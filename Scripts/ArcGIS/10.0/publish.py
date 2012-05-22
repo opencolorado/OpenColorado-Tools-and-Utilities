@@ -33,6 +33,8 @@
 
 # Import system modules
 import sys, string, os, arcpy, shutil, zipfile, glob, ckanclient, datetime, argparse
+from arcpy import env
+import xml.etree.ElementTree as et
 
 # Global variables
 args = None
@@ -85,6 +87,7 @@ def main():
     parser.add_argument('-p', '--ckan-dataset-prefix',
         action='store', 
         dest='ckan_dataset_prefix',
+		default='',
         help='A prefix used in conjunction with the catalog_dataset argument to create the complete dataset name on OpenColorado.')
     
     parser.add_argument('-i',
@@ -93,7 +96,13 @@ def main():
         choices=['major','minor','revision','none'],
         default='revision',
         help='Update the version number on OpenColorado \n(default: %(default)s)')
-     
+    
+    parser.add_argument('-m', '--update-from-metadata',
+        action='store', 
+        dest='update_from_metadata',
+        choices=['description','tags','all'],
+        help='Update dataset information using the source metadata')
+		
     parser.add_argument('-v', '--verbose',
         action='store_true', 
         dest='verbose', 
@@ -123,7 +132,7 @@ def main():
     # If no formats are specified then enable all formats
     if args.formats == None:
         args.formats = 'shp','dwg','kml'
-        
+		        
     info('Starting ' + sys.argv[0])
     debug(' Feature class: ' + source_feature_class)
     debug(' Catalog dataset: ' + args.catalog_dataset)
@@ -148,6 +157,11 @@ def main():
         info('Exporting to kml file')
         export_kml()
     
+	# Update the dataset information on the ckan repository from the metadata
+	if args.update_from_metadata != None:
+		info('Updating dataset information from metadata')
+		update_from_metadata()
+	
     # Update the dataset version on the ckan repository (causes the last modified date to be updated)
     if args.increment != "none":
         info('Updating dataset version')
@@ -194,7 +208,7 @@ def create_dataset_temp_folder():
     Returns:
       None
     """
-    directory = os.path.join(output_folder + get_dataset_filename(),temp_folder)
+    directory = os.path.join(output_folder,get_dataset_filename(),temp_folder)
     create_folder(directory)
 
 def delete_dataset_temp_folder():
@@ -241,7 +255,7 @@ def export_shapefile():
     name = get_dataset_filename()
     
     # Create a shape folder in the temp directory if it does not exist
-    working_folder = output_folder + name + "//" + temp_folder + "//" + folder
+    working_folder = os.path.join(output_folder,name,temp_folder,folder)
     create_folder(working_folder, True)
 
     # Create a folder for the shapefile (since it is a folder)
@@ -277,7 +291,7 @@ def export_cad():
     name = get_dataset_filename()
     
     # Create a cad folder in the temp directory if it does not exist
-    working_folder = output_folder + name + "//" + temp_folder + "//" + folder
+    working_folder = os.path.join(output_folder,name,temp_folder,folder)
     create_folder(working_folder, True)
     
     # Export the shapefile to the folder
@@ -303,12 +317,12 @@ def export_kml():
     name = get_dataset_filename()
     
     # Create a kml folder in the temp directory if it does not exist
-    working_folder = os.path.join(output_folder + name,temp_folder,folder)
+    working_folder = os.path.join(output_folder,name,temp_folder,folder)
     create_folder(working_folder, True)
     
     # Export the feature class to a temporary file gdb
     source = source_feature_class
-    destination = working_folder + os.sep + name + ".kmz"
+    destination = os.path.join(working_folder,name + ".kmz")
     
     gdb_temp = os.path.join(working_folder,name + ".gdb")
     gdb_feature_class = os.path.join(gdb_temp,name)
@@ -364,7 +378,71 @@ def update_dataset_version():
         
     except ckanclient.CkanApiNotFoundError:
         info(" Dataset " + dataset_id + " not found on OpenColorado")
-        
+		
+def update_from_metadata():
+    global args, env
+    
+    folder = 'metadata'
+    name = get_dataset_filename()
+    
+    # Initialize ckan client
+    ckan = ckanclient.CkanClient(base_location=args.ckan_api,api_key=args.ckan_api_key)
+    
+    # Create the name of the dataset on the CKAN instance
+    dataset_id = args.ckan_dataset_prefix + args.catalog_dataset
+	
+    #try:
+    #    # Get the dataset
+    #    dataset_entity = ckan.package_entity_get(dataset_id)
+                      
+    #except ckanclient.CkanApiNotFoundError:
+    #    info(" Dataset " + dataset_id + " not found on OpenColorado")
+    
+    #if dataset_entity != None:
+    
+    # Create a kml folder in the temp directory if it does not exist
+    working_folder = os.path.join(output_folder,name,temp_folder,folder)
+    create_folder(working_folder, True)
+    
+    # Export the feature class to a temporary file gdb
+    source = source_feature_class
+    destination = os.path.join(working_folder,name + ".xml")
+    
+    # Export the metadata
+    env.workspace = "C:/temp"
+    dir = arcpy.GetInstallInfo("desktop")["InstallDir"]
+    translator = dir + "Metadata/Translator/ESRI_ISO2ISO19139.xml"
+    
+    arcpy.ExportMetadata_conversion(source, translator, destination)
+    
+    # Publish the metadata to the download folder
+    publish_file(working_folder, name + ".xml","metadata")
+    
+    metadata_file = open(destination,"r")
+    metadata_xml = et.parse(metadata_file)
+ 
+    # Specify the namespaces
+    ns_gmd = "{http://www.isotc211.org/2005/gmd}"
+    ns_gco = "{http://www.isotc211.org/2005/gco}"
+    
+    # Get the abstract
+    xpath_abstract = '{0}identificationInfo/{0}MD_DataIdentification/{0}abstract/{1}CharacterString'.format(ns_gmd,ns_gco);
+    abstract = metadata_xml.find(xpath_abstract).text
+    #print abstract
+    
+    # Get the keywords
+    xpath_keywords = '//{0}MD_Keywords/{0}keyword/{1}CharacterString'.format(ns_gmd,ns_gco);
+    keyword_elements = metadata_xml.findall(xpath_keywords)
+    for keyword_element in keyword_elements:
+        keyword = keyword_element.text
+        keyword = keyword.lower().replace(' ','-')
+    #    print keyword
+     
+    # TODO: Update the dataset and push the info to the catalog
+    
+    # Update the dataset
+    #ckan.package_entity_put(dataset_entity)
+
 def increment_version(version, increment_type):
     incremented_version = version
     
