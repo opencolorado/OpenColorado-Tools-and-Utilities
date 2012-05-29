@@ -32,7 +32,7 @@
 # ---------------------------------------------------------------------------
 
 # Import system modules
-import sys, string, os, arcpy, shutil, zipfile, glob, ckanclient, datetime, argparse
+import sys, os, arcpy, shutil, zipfile, glob, ckanclient, datetime, argparse
 from arcpy import env
 import xml.etree.ElementTree as et
 
@@ -51,9 +51,8 @@ def main():
 	"""
 	global args, output_folder, source_feature_class
 	
-	parser = argparse.ArgumentParser(description='Publish a feature class from ArcSDE to OpenColorado.')
 	parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
-
+			
 	# Optional arguments	   
 	parser.add_argument('-o', '--output-folder',
 		action='store', 
@@ -227,7 +226,7 @@ def delete_dataset_temp_folder():
 		debug('Deleting directory "' + directory)
 		shutil.rmtree(directory)
 
-def publish_file(directory, file, type):
+def publish_file(directory, file_name, file_type):
 	"""Publishes a file to the catalog download folder
 	
 	Returns:
@@ -236,10 +235,10 @@ def publish_file(directory, file, type):
 	
 	folder = create_folder(os.path.join(output_folder,get_dataset_filename()))
 	
-	folder = create_folder(os.path.join(folder,type))
+	folder = create_folder(os.path.join(folder,file_type))
 	
-	info(' Copying ' + file + ' to ' + folder)
-	shutil.copyfile(os.path.join(directory,file), os.path.join(folder,file))
+	info(' Copying ' + file_name + ' to ' + folder)
+	shutil.copyfile(os.path.join(directory,file_name), os.path.join(folder,file_name))
 
 def get_dataset_filename():
 	"""Gets a file system friendly name from the catalog dataset name
@@ -276,12 +275,12 @@ def export_shapefile():
 	
 	# Zip up the files
 	debug(' - Zipping the shapefile')
-	zip = zipfile.ZipFile(os.path.join(working_folder,name + ".zip"), "w")
+	zip_file = zipfile.ZipFile(os.path.join(working_folder,name + ".zip"), "w")
 	
 	for filename in glob.glob(working_folder + "/" + name + "/*"):
-		zip.write(filename, os.path.basename(filename), zipfile.ZIP_DEFLATED)
+		zip_file.write(filename, os.path.basename(filename), zipfile.ZIP_DEFLATED)
 		
-	zip.close()
+	zip_file.close()
 	
 	# Publish the zipfile to the download folder
 	publish_file(working_folder, name + ".zip","shape")
@@ -345,7 +344,7 @@ def export_kml():
 	
 	# Replace any literal nulls <Null> with empty as these don't convert to KML correctly
 	replace_literal_nulls(name)
-   
+
 	# Convert the layer to KML
 	debug(' - Exporting KML file (KMZ) to "' + destination + '"')
 	arcpy.LayerToKML_conversion(name, destination, "20000", "false", "DEFAULT", "1024", "96")
@@ -416,8 +415,8 @@ def update_from_metadata():
 	
 	# Export the metadata
 	env.workspace = "C:/temp"
-	dir = arcpy.GetInstallInfo("desktop")["InstallDir"]
-	translator = dir + "Metadata/Translator/ESRI_ISO2ISO19139.xml"
+	installDir = arcpy.GetInstallInfo("desktop")["InstallDir"]
+	translator = installDir + "Metadata/Translator/ESRI_ISO2ISO19139.xml"
 	
 	arcpy.ExportMetadata_conversion(source, translator, destination)
 	
@@ -426,7 +425,7 @@ def update_from_metadata():
 	
 	metadata_file = open(destination,"r")
 	metadata_xml = et.parse(metadata_file)
- 
+
 	# Specify the namespaces
 	ns_gmd = "{http://www.isotc211.org/2005/gmd}"
 	ns_gco = "{http://www.isotc211.org/2005/gco}"
@@ -505,7 +504,7 @@ def update_from_metadata():
 	
 	# Update the dataset
 	ckan.package_entity_put(dataset_entity)
-  
+
 def increment_version(version, increment_type):
 	incremented_version = version
 	
