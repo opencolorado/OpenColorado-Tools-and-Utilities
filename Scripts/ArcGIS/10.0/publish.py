@@ -33,7 +33,6 @@
 
 # Import system modules
 import sys, os, arcpy, shutil, zipfile, glob, ckanclient, datetime, argparse
-from arcpy import env
 import xml.etree.ElementTree as et
 
 # Global variables
@@ -384,7 +383,7 @@ def update_dataset_version():
 		info(" Dataset " + dataset_id + " not found on OpenColorado")
 		
 def update_from_metadata():
-	global args, env
+	global args
 	
 	folder = 'metadata'
 	name = get_dataset_filename()
@@ -414,7 +413,7 @@ def update_from_metadata():
 	destination = os.path.join(working_folder,name + ".xml")
 	
 	# Export the metadata
-	env.workspace = "C:/temp"
+	arcpy.env.workspace = "C:/temp"
 	installDir = arcpy.GetInstallInfo("desktop")["InstallDir"]
 	translator = installDir + "Metadata/Translator/ESRI_ISO2ISO19139.xml"
 	
