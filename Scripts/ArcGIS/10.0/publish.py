@@ -393,16 +393,19 @@ def update_from_metadata():
 	
 	# Create the name of the dataset on the CKAN instance
 	dataset_id = args.ckan_dataset_prefix + args.catalog_dataset
-	
+
 	try:
 		# Get the dataset
 		dataset_entity = ckan.package_entity_get(dataset_id)
-
+		info(" Dataset " + dataset_id + " found on OpenColorado")
+		
 	except ckanclient.CkanApiNotFoundError:
+		dataset_entity = None
 		info(" Dataset " + dataset_id + " not found on OpenColorado")
-	
-	if dataset_entity != None:
-		info(" Dataset " + dataset_id + " found on OpenColorado")	   
+
+	if dataset_entity is None:
+		info(" New Dataset " + dataset_id + " being created on OpenColorado")
+		dataset_entity = {};
 	
 	# Create a kml folder in the temp directory if it does not exist
 	working_folder = os.path.join(output_folder,name,temp_folder,folder)
@@ -501,8 +504,18 @@ def update_from_metadata():
 		
 	dataset_entity['resources'] = resources;
 	
-	# Update the dataset
-	ckan.package_entity_put(dataset_entity)
+	# Update the CKAN groups the dataset belongs to
+	group_list = ckan.group_register_get()
+	dataset_entity['groups'] = group_list
+	
+	if dataset_entity.has_key('name'):
+		# Update the dataset
+		ckan.package_entity_put(dataset_entity)
+	else:
+		# This dataset doesn't exist on OpenColorado, create new dataset 
+		dataset_entity['name'] = dataset_id
+		dataset_entity['license_id'] = 'cc-zero'
+		ckan.package_register_post(dataset_entity)	
 
 def increment_version(version, increment_type):
 	incremented_version = version
