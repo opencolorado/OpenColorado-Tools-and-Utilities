@@ -53,12 +53,17 @@ def main():
 	
 	parser = argparse.ArgumentParser(description='Publish a feature class from ArcSDE to OpenColorado.')
 	parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
-			
+
 	# Optional arguments	   
 	parser.add_argument('-o', '--output-folder',
 		action='store', 
 		dest='output_folder',
 		help='The root output folder in which to create the published files.  Sub-folders will automatically be created for each dataset (ex. C:\\\\temp).')
+	
+	parser.add_argument('-d', '--download-url',
+		action='store', 
+		dest='download_url',
+		help='The root path to the data download repository. (ex. (ex. http://data.denvergov.org/)).')
 	
 	parser.add_argument('-s', '--source-workspace',
 		action='store', 
@@ -391,14 +396,15 @@ def update_from_metadata():
 	# Create the name of the dataset on the CKAN instance
 	dataset_id = args.ckan_dataset_prefix + args.catalog_dataset
 	
-	#try:
-	#	# Get the dataset
-	#	dataset_entity = ckan.package_entity_get(dataset_id)
-					  
-	#except ckanclient.CkanApiNotFoundError:
-	#	info(" Dataset " + dataset_id + " not found on OpenColorado")
+	try:
+		# Get the dataset
+		dataset_entity = ckan.package_entity_get(dataset_id)
+
+	except ckanclient.CkanApiNotFoundError:
+		info(" Dataset " + dataset_id + " not found on OpenColorado")
 	
-	#if dataset_entity != None:
+	if dataset_entity != None:
+		info(" Dataset " + dataset_id + " found on OpenColorado")	   
 	
 	# Create a kml folder in the temp directory if it does not exist
 	working_folder = os.path.join(output_folder,name,temp_folder,folder)
@@ -425,24 +431,81 @@ def update_from_metadata():
 	ns_gmd = "{http://www.isotc211.org/2005/gmd}"
 	ns_gco = "{http://www.isotc211.org/2005/gco}"
 	
+	# Get the dataset title
+	xpath_title = '//{0}identificationInfo/{0}MD_DataIdentification/{0}citation/{0}CI_Citation/{0}title/{1}CharacterString'.format(ns_gmd,ns_gco);
+	title = metadata_xml.find(xpath_title).text
+	
 	# Get the abstract
 	xpath_abstract = '{0}identificationInfo/{0}MD_DataIdentification/{0}abstract/{1}CharacterString'.format(ns_gmd,ns_gco);
 	abstract = metadata_xml.find(xpath_abstract).text
-	#print abstract
+	debug ('Abstract from metadata: ' + abstract);
 	
 	# Get the keywords
 	xpath_keywords = '//{0}MD_Keywords/{0}keyword/{1}CharacterString'.format(ns_gmd,ns_gco);
 	keyword_elements = metadata_xml.findall(xpath_keywords)
+	keywords = []
 	for keyword_element in keyword_elements:
 		keyword = keyword_element.text
 		keyword = keyword.lower().replace(' ','-')
-	#	print keyword
-	 
-	# TODO: Update the dataset and push the info to the catalog
+		keywords.append(keyword)
+		debug ('Keywords found in metadata: ' + keyword);
+
+	# Get the maintainer
+	xpath_maintainer= '//{0}distributionInfo/{0}MD_Distribution/{0}distributor/{0}MD_Distributor/{0}distributorContact/{0}CI_ResponsibleParty/{0}organisationName/{1}CharacterString'.format(ns_gmd,ns_gco);
+	maintainer = metadata_xml.find(xpath_maintainer).text
+
+	# Get the maintainer email
+	xpath_maintainer_email = '//{0}distributionInfo/{0}MD_Distribution/{0}distributor/{0}MD_Distributor/{0}distributorContact/{0}CI_ResponsibleParty/{0}contactInfo/{0}CI_Contact/{0}address/{0}CI_Address/{0}electronicMailAddress/{1}CharacterString'.format(ns_gmd,ns_gco);
+	maintainer_email = metadata_xml.find(xpath_maintainer_email).text
+
+	# Get the author
+	xpath_author = '//{0}identificationInfo/{0}MD_DataIdentification/{0}pointOfContact/{0}CI_ResponsibleParty/{0}individualName/{1}CharacterString'.format(ns_gmd,ns_gco);
+	author = metadata_xml.find(xpath_author).text
+
+	# Get the author_email
+	xpath_author_email = '//{0}identificationInfo/{0}MD_DataIdentification/{0}pointOfContact/{0}CI_ResponsibleParty/{0}contactInfo/{0}CI_Contact/{0}address/{0}CI_Address/{0}electronicMailAddress/{1}CharacterString'.format(ns_gmd,ns_gco);
+	author_email = metadata_xml.find(xpath_author_email).text
+	
+	# Update the dataset attributes from the ArcGIS Metadata
+	dataset_entity['title'] = title
+	dataset_entity['notes'] = abstract
+	dataset_entity['tags'] = keywords
+	dataset_entity['maintainer'] = maintainer
+	dataset_entity['maintainer_email'] = maintainer_email
+	dataset_entity['author'] = author
+	dataset_entity['author_email'] = author_email
+
+	# Construct the file resource download urls   
+	dataset_name = get_dataset_filename()   
+	resources = [
+		{
+			'name': title + ' - KML',
+			'description': title + ' - KML',
+			'url': args.download_url + dataset_name + '/kml/' + dataset_name + '.kmz',
+			'mimetype': 'application/vnd.google-earth.kmz',
+			'format': 'KML'
+		},
+		{
+			'name': title + ' - Shapefile',
+			'description': title + ' - Shapefile',			
+			'url': args.download_url + dataset_name + '/shape/' + dataset_name + '.zip',
+			'mimetype': 'application/zip',			
+			'format': 'SHP'
+		},
+		{
+			'name': title + ' - AutoCAD DWG',
+			'description': title + ' - AutoCAD DWG',
+			'url': args.download_url + dataset_name + '/cad/' + dataset_name + '.dwg',
+			'mimetype': 'application/acad',
+			'format': 'DWG'
+		}
+	]
+		
+	dataset_entity['resources'] = resources;
 	
 	# Update the dataset
-	#ckan.package_entity_put(dataset_entity)
-
+	ckan.package_entity_put(dataset_entity)
+  
 def increment_version(version, increment_type):
 	incremented_version = version
 	
