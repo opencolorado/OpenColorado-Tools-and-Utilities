@@ -87,11 +87,17 @@ def main():
 		required=True,
 		help='The CKAN API key (get from http://colorado.ckan.net/user/me when logged in)')
 	
-	parser.add_argument('-p', '--ckan-dataset-prefix',
+	parser.add_argument('-p', '--ckan-dataset-name-prefix',
 		action='store', 
-		dest='ckan_dataset_prefix',
+		dest='ckan_dataset_name_prefix',
 		default='',
-		help='A prefix used in conjunction with the catalog_dataset argument to create the complete dataset name on OpenColorado.')
+		help='A prefix used in conjunction with the dataset-name argument to create the complete dataset name on OpenColorado.')
+
+	parser.add_argument('-t', '--ckan-dataset-title-prefix',
+		action='store', 
+		dest='ckan_dataset_title_prefix',
+		default='',
+		help='A prefix used in conjunction with the dataset-title argument to create the complete dataset title on OpenColorado.')
 	
 	parser.add_argument('-i',
 		action='store', 
@@ -116,9 +122,13 @@ def main():
 		action='store',
 		help='The fully qualified path to the feature class (ex. Database Connections\\\\SDE Connection.sde\\\\schema.parcels).  If a source workspace is specified (ex. -s Database Connections\\\\SDE Connection.sde) just the feature class name needs to be provided here (ex. schema.parcels)')
 		
-	parser.add_argument('catalog_dataset',
+	parser.add_argument('dataset_name',
 		action='store',
 		help='The name of the dataset on OpenColorado.  If a prefix is provided (-p) don''t include it here.')
+
+	parser.add_argument('dataset_title',
+		action='store',
+		help='The title of the dataset on OpenColorado.  If a prefix is provided (-t) don''t include it here.')
 			
 	args = parser.parse_args()
 	
@@ -138,7 +148,8 @@ def main():
 				
 	info('Starting ' + sys.argv[0])
 	debug(' Feature class: ' + source_feature_class)
-	debug(' Catalog dataset: ' + args.catalog_dataset)
+	debug(' Dataset name: ' + args.dataset_name)
+	debug(' Dataset title: ' + args.dataset_title)
 	debug(' Publish folder: ' + output_folder)
 						
 	# Create the dataset folder
@@ -246,7 +257,7 @@ def get_dataset_filename():
         None
 	"""
 	global args
-	return args.catalog_dataset.replace("-","_")
+	return args.dataset_name.replace("-","_")
 	
 def export_shapefile():
 	"""Exports the feature class as a zipped shapefile
@@ -365,7 +376,7 @@ def update_dataset_version():
 	ckan = ckanclient.CkanClient(base_location=args.ckan_api,api_key=args.ckan_api_key)
 	
 	# Create the name of the dataset on the CKAN instance
-	dataset_id = args.ckan_dataset_prefix + args.catalog_dataset
+	dataset_id = args.ckan_dataset_name_prefix + args.dataset_name
 	
 	try:
 		# Get the dataset
@@ -392,7 +403,7 @@ def update_from_metadata():
 	ckan = ckanclient.CkanClient(base_location=args.ckan_api,api_key=args.ckan_api_key)
 	
 	# Create the name of the dataset on the CKAN instance
-	dataset_id = args.ckan_dataset_prefix + args.catalog_dataset
+	dataset_id = args.ckan_dataset_name_prefix + args.dataset_name
 
 	try:
 		# Get the dataset
@@ -431,10 +442,13 @@ def update_from_metadata():
 	# Specify the namespaces
 	ns_gmd = "{http://www.isotc211.org/2005/gmd}"
 	ns_gco = "{http://www.isotc211.org/2005/gco}"
-	
+
 	# Get the dataset title
-	xpath_title = '//{0}identificationInfo/{0}MD_DataIdentification/{0}citation/{0}CI_Citation/{0}title/{1}CharacterString'.format(ns_gmd,ns_gco);
-	title = metadata_xml.find(xpath_title).text
+	title = args.ckan_dataset_title_prefix + ": " + args.dataset_title
+	
+	# Get the dataset description
+	xpath_description = '//{0}identificationInfo/{0}MD_DataIdentification/{0}citation/{0}CI_Citation/{0}title/{1}CharacterString'.format(ns_gmd,ns_gco);
+	description = metadata_xml.find(xpath_description).text
 	
 	# Get the abstract
 	xpath_abstract = '{0}identificationInfo/{0}MD_DataIdentification/{0}abstract/{1}CharacterString'.format(ns_gmd,ns_gco);
@@ -481,21 +495,21 @@ def update_from_metadata():
 	resources = [
 		{
 			'name': title + ' - KML',
-			'description': title + ' - KML',
+			'description': description + ' - KML',
 			'url': args.download_url + dataset_name + '/kml/' + dataset_name + '.kmz',
 			'mimetype': 'application/vnd.google-earth.kmz',
 			'format': 'KML'
 		},
 		{
 			'name': title + ' - Shapefile',
-			'description': title + ' - Shapefile',			
+			'description': description + ' - Shapefile',			
 			'url': args.download_url + dataset_name + '/shape/' + dataset_name + '.zip',
 			'mimetype': 'application/zip',			
 			'format': 'SHP'
 		},
 		{
 			'name': title + ' - AutoCAD DWG',
-			'description': title + ' - AutoCAD DWG',
+			'description': description + ' - AutoCAD DWG',
 			'url': args.download_url + dataset_name + '/cad/' + dataset_name + '.dwg',
 			'mimetype': 'application/acad',
 			'format': 'DWG'
