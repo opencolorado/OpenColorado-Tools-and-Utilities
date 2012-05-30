@@ -1,34 +1,48 @@
 # ---------------------------------------------------------------------------
 # publish.py
-# Publish a feature class from ArcSDE to the OpenColorado Data Catalog.  
-# Publish in this case only means creating the output files that can be shared
-# via a web server.  The script does *not* create the dataset on OpenColorado.
-#
-# If the dataset exists on OpenColorado its minor version number will be
-# incremented. 
-#
+# ---------------------------------------------------------------------------
+# Publish a feature class from ArcSDE to the OpenColorado Data Catalog.
+# The publishing process creats output files in a variety of formats that 
+# can be shared via a web server. The script uses the CKAN client API to
+# create the dataset on OpenColorado if it does not already exist. 
+# If the dataset exists, its revision number will be incremented.
+#----------------------------------------------------------------------------
 # This script completes the following:
 # 1) Exports the ArcSDE feature class to the download folder
 #    in the following formats:
+#
 #    a. Shapefile (zipped)
 #    b. CAD (dwg file)
 #    c. KML (zipped KMZ)
-# 2) Updates the version number of the dataset on the CKAN repository
-#    catalog (if the dataset is present)
-# 3) The script automatically manages the creation of output folders if they
+#	 d. ArcGIS Metadata (xml)
+#
+# 	 The script automatically manages the creation of output folders if they
 #    do not already exist.  Also creates temp folders for processing as
-#    needed.
-# 4) The output folder has the following structure.  You can start with an 
-#    empty folder and the script will create the necessary directories.
+#    needed. The output folder has the following structure. You can start
+#    with an empty folder and the script will create the necessary 
+#	 directories.
+#
 #		<output_folder>
-#		    |- <dataset_name> (catalog dataset name with prefix removed, dashes 
-#							  replaced with underscores)
+#		    |- <dataset_name> (catalog dataset name with prefix removed, 
+#							   dashes replaced with underscores)
 #			    |- shape
 #				    |- <dataset_name>.shp
 #		        |- cad
 #				    |- <dataset_name>.dwg
 #		        |- kml 
 #				    |- <dataset_name>.kmz
+#		        |- metadata 
+#				    |- <dataset_name>.xml
+#
+# 2) Reads the exported ArcGIS Metadata xml file and parses the relevant
+#	 metadata fields to be published to the OpenColorado Data Repository.
+#
+# 3) Uses the CKAN client API to create a new dataset on the OpenColorado
+#	 Data Repository if the dataset does not already exist. If the dataset
+#	 already exists, it is updated. 
+#
+# 4) Updates the version (revision) number of the dataset on the OpenColorado
+#     Data Catalog (if it already exists)
 # ---------------------------------------------------------------------------
 
 # Import system modules
@@ -149,7 +163,6 @@ def main():
 	info('Starting ' + sys.argv[0])
 	debug(' Feature class: ' + source_feature_class)
 	debug(' Dataset name: ' + args.dataset_name)
-	debug(' Dataset title: ' + args.dataset_title)
 	debug(' Publish folder: ' + output_folder)
 						
 	# Create the dataset folder
@@ -318,7 +331,7 @@ def export_cad():
 	
 	# Publish the zipfile to the download folder
 	publish_file(working_folder, name + ".dwg","cad")
-	
+		
 def export_kml():
 	"""Exports the feature class to a kml file
 	
@@ -370,6 +383,11 @@ def export_kml():
 	publish_file(working_folder, name + ".kmz","kml")
 
 def update_dataset_version():
+	"""Updates the dataset version number on CKAN repository
+	
+	Returns:
+        None
+	"""	
 	global args
 	
 	# Initialize ckan client
@@ -394,6 +412,18 @@ def update_dataset_version():
 		info(" Dataset " + dataset_id + " not found on OpenColorado")
 		
 def update_from_metadata():
+	"""Updates the ckan dataset entity by reading in metadata
+	   from the ArcGIS Metadata xml file. If the dataset already
+	   exists in the CKAN repository, the dataset is fecthed
+	   and modified. If the dataset does not already exist,
+	   a new dataset entity object is created. 
+	
+	Returns:
+        An object structured the same as the JSON dataset output from
+        the CKAN REST API. For more information on the structure look at the
+        web service JSON output, or reference:
+        http://docs.ckan.org/en/latest/api-v2.html#model-api
+	"""		
 	global args
 	
 	folder = 'metadata'
@@ -422,7 +452,7 @@ def update_from_metadata():
 	working_folder = os.path.join(output_folder,name,temp_folder,folder)
 	create_folder(working_folder, True)
 	
-	# Export the feature class to a temporary file gdb
+	# Set the destinion of the metadata export
 	source = source_feature_class
 	destination = os.path.join(working_folder,name + ".xml")
 	
@@ -436,6 +466,7 @@ def update_from_metadata():
 	# Publish the metadata to the download folder
 	publish_file(working_folder, name + ".xml","metadata")
 	
+	# Open the file and read in the xml
 	metadata_file = open(destination,"r")
 	metadata_xml = et.parse(metadata_file)
 
@@ -532,6 +563,16 @@ def update_from_metadata():
 		ckan.package_register_post(dataset_entity)	
 
 def increment_version(version, increment_type):
+	"""Increments the version number
+	
+	Parameters:
+		version - A version in the format <major.minor.revision>
+		increment_type - [major, minor, or revision]
+	
+	Returns:
+        a string representing the incremented version in the format
+        <major.minor.revision>
+	"""
 	incremented_version = version
 	
 	if version == None:
@@ -556,7 +597,14 @@ def increment_version(version, increment_type):
 	return incremented_version
 
 def replace_literal_nulls(feature_layer):
+	"""Replaces <Null> with empty string in data fields
 	
+	Parameters:
+		feature_layer - The name of the ArcGIS dataset to replace values in
+	
+	Returns:
+        None
+	"""
 	debug(' - Replacing <Null> with empty string in all string fields')
 	fieldList = arcpy.ListFields(feature_layer)
 	
