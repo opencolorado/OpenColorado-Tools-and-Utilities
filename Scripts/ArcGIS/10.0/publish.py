@@ -53,7 +53,7 @@ import xml.etree.ElementTree as et
 args = None
 output_folder = None
 source_feature_class = None
-
+ckan_client = None
 temp_folder = "temp"
 
 def main():
@@ -184,20 +184,47 @@ def main():
 		info('Exporting to kml file')
 		export_kml()
 	
-	# Update the dataset information on the ckan repository from the metadata
+	# Update the dataset information on the CKAN repository from the metadata
 	if args.update_from_metadata != None:
-		info('Updating dataset information from metadata')
-		update_from_metadata()
-	
-	# Update the dataset version on the ckan repository (causes the last modified date to be updated)
-	if args.increment != "none":
-		info('Updating dataset version')
-		update_dataset_version()
+		publish_to_ckan()
 	
 	# Delete the dataset temp folder
 	delete_dataset_temp_folder()
 	
 	info('Completed ' + sys.argv[0])
+
+def publish_to_ckan():
+	"""Updates the dataset in the CKAN repository or creates a new dataset
+
+	Returns:
+	    None
+	"""
+	global ckan_client
+	
+	# Initialize the CKAN client  
+	ckan_client = ckanclient.CkanClient(base_location=args.ckan_api,api_key=args.ckan_api_key)
+	
+	# Create the name of the dataset on the CKAN instance
+	dataset_id = args.ckan_dataset_name_prefix + args.dataset_name
+	
+	# Get the dataset from CKAN
+	dataset_entity = get_remote_dataset(dataset_id)
+	
+	# Check to see if the dataset exists on CKAN or not
+	if dataset_entity is None:
+		# Create a new dataset in CKAN
+		dataset_entity = create_local_dataset(dataset_id)
+		dataset_entity = update_local_dataset_from_metadata(dataset_entity)
+		create_remote_dataset(dataset_entity)
+	else:
+		# Update existing dataset in CKAN
+		dataset_entity = update_local_dataset_from_metadata(dataset_entity)
+		update_remote_dataset(dataset_entity)
+
+	# Update the dataset version on the CKAN repository (causes the last modified date to be updated)
+	if args.increment != "none":
+		info('Updating dataset version')
+		update_dataset_version()
 	
 def create_folder(directory, delete=False):
 	"""Creates a folder if it does not exist
@@ -390,7 +417,7 @@ def update_dataset_version():
 	"""	
 	global args
 	
-	# Initialize ckan client
+	# Initialize CKAN client
 	ckan = ckanclient.CkanClient(base_location=args.ckan_api,api_key=args.ckan_api_key)
 	
 	# Create the name of the dataset on the CKAN instance
@@ -410,13 +437,42 @@ def update_dataset_version():
 		
 	except ckanclient.CkanApiNotFoundError:
 		info(" Dataset " + dataset_id + " not found on OpenColorado")
+
+def get_remote_dataset(dataset_id):
+
+	dataset_entity = None
+
+	try:
+		# Get the dataset
+		dataset_entity = ckan_client.package_entity_get(dataset_id)
+		info(" Dataset " + dataset_id + " found on OpenColorado")
 		
-def update_from_metadata():
-	"""Updates the ckan dataset entity by reading in metadata
+	except ckanclient.CkanApiNotFoundError:
+		info(" Dataset " + dataset_id + " not found on OpenColorado")
+
+	return dataset_entity
+		
+def create_local_dataset(dataset_id):
+
+	info(" New Dataset " + dataset_id + " being created on OpenColorado")
+	dataset_entity = {};
+	dataset_entity['name'] = dataset_id
+	dataset_entity['license_id'] = 'cc-zero'	
+
+	return dataset_entity
+		
+def update_local_dataset_from_metadata(dataset_entity):
+	"""Updates the CKAN dataset entity by reading in metadata
 	   from the ArcGIS Metadata xml file. If the dataset already
 	   exists in the CKAN repository, the dataset is fecthed
 	   and modified. If the dataset does not already exist,
 	   a new dataset entity object is created. 
+	   
+	Parameters:
+		dataset_entity - An object structured the same as the JSON dataset output from
+		the CKAN REST API. For more information on the structure look at the
+		web service JSON output, or reference:
+		http://docs.ckan.org/en/latest/api-v2.html#model-api
 	
 	Returns:
         An object structured the same as the JSON dataset output from
@@ -424,29 +480,10 @@ def update_from_metadata():
         web service JSON output, or reference:
         http://docs.ckan.org/en/latest/api-v2.html#model-api
 	"""		
-	global args
+	global args, ckan_client
 	
 	folder = 'metadata'
 	name = get_dataset_filename()
-	
-	# Initialize ckan client
-	ckan = ckanclient.CkanClient(base_location=args.ckan_api,api_key=args.ckan_api_key)
-	
-	# Create the name of the dataset on the CKAN instance
-	dataset_id = args.ckan_dataset_name_prefix + args.dataset_name
-
-	try:
-		# Get the dataset
-		dataset_entity = ckan.package_entity_get(dataset_id)
-		info(" Dataset " + dataset_id + " found on OpenColorado")
-		
-	except ckanclient.CkanApiNotFoundError:
-		dataset_entity = None
-		info(" Dataset " + dataset_id + " not found on OpenColorado")
-
-	if dataset_entity is None:
-		info(" New Dataset " + dataset_id + " being created on OpenColorado")
-		dataset_entity = {};
 	
 	# Create a kml folder in the temp directory if it does not exist
 	working_folder = os.path.join(output_folder,name,temp_folder,folder)
@@ -550,17 +587,45 @@ def update_from_metadata():
 	dataset_entity['resources'] = resources;
 	
 	# Update the CKAN groups the dataset belongs to
-	group_list = ckan.group_register_get()
+	group_list = ckan_client.group_register_get()
 	dataset_entity['groups'] = group_list
+
+	return dataset_entity
+
+def update_remote_dataset(dataset_entity):
+	"""Updates the remote CKAN dataset.
+	   The dataset already exists in the CKAN repository, it is updated.
 	
-	if dataset_entity.has_key('name'):
-		# Update the dataset
-		ckan.package_entity_put(dataset_entity)
-	else:
-		# This dataset doesn't exist on OpenColorado, create new dataset 
-		dataset_entity['name'] = dataset_id
-		dataset_entity['license_id'] = 'cc-zero'
-		ckan.package_register_post(dataset_entity)	
+	Parameters:
+        dataset_entity - An object structured the same as the JSON dataset 
+        output from the CKAN REST API. For more information on the structure 
+        look at the web service JSON output, or reference:
+        http://docs.ckan.org/en/latest/api-v2.html#model-api
+    
+    Returns:
+    	None
+	"""	
+	global ckan_client
+	
+	ckan_client.package_entity_put(dataset_entity)
+		
+def create_remote_dataset(dataset_entity):
+	"""Creates a new remote CKAN dataset.
+	   The dataset does not yet exists in the CKAN repository, it is created.
+	
+	Parameters:
+        dataset_entity - An object structured the same as the JSON dataset 
+        output from the CKAN REST API. For more information on the structure 
+        look at the web service JSON output, or reference:
+        http://docs.ckan.org/en/latest/api-v2.html#model-api
+    
+    Returns:
+    	None
+	"""	
+	global ckan_client	
+
+	# Create a new dataset on OpenColorado 
+	ckan_client.package_register_post(dataset_entity)		
 
 def increment_version(version, increment_type):
 	"""Increments the version number
