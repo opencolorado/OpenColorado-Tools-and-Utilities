@@ -118,6 +118,12 @@ def main():
 		dest='ckan_group_name',
 		default='',
 		help='The group name in the OpenColorado group register that the dataset will be added to.')
+
+	parser.add_argument('-l', '--ckan-license',
+		action='store', 
+		dest='ckan_license',
+		default='cc-zero',
+		help='The default data license type for the dataset.')
 	
 	parser.add_argument('-i',
 		action='store', 
@@ -497,7 +503,7 @@ def create_local_dataset(dataset_id):
 	info(' New Dataset ' + dataset_id + ' being initialized')
 	dataset_entity = {};
 	dataset_entity['name'] = dataset_id
-	dataset_entity['license_id'] = 'cc-zero'
+	dataset_entity['license_id'] = args.ckan_license
 	dataset_entity['title'] = get_dataset_title()
 
 	# Find the correct CKAN group id to assign the dataset to
@@ -743,4 +749,3 @@ def log(message):
 #Execute main function	
 if __name__ == '__main__':
 	main()
-	
