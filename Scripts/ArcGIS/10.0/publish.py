@@ -113,6 +113,12 @@ def main():
 		default='',
 		help='A prefix used in conjunction with the dataset-title argument to create the complete dataset title on OpenColorado.')
 	
+	parser.add_argument('-g', '--ckan-group-name',
+		action='store', 
+		dest='ckan_group_name',
+		default='',
+		help='The group name in the OpenColorado group register that the dataset will be added to.')
+	
 	parser.add_argument('-i',
 		action='store', 
 		dest='increment',
@@ -294,10 +300,21 @@ def get_dataset_filename():
 	"""Gets a file system friendly name from the catalog dataset name
 	
 	Returns:
-        None
+        A string representing the dataset file name
 	"""
 	global args
 	return args.dataset_name.replace("-","_")
+
+def get_dataset_title():
+	"""Gets the title of the catalog dataset
+	
+	Returns:
+        A string representing the dataset title
+	"""
+	global args
+
+	# Create the dataset title
+	return args.ckan_dataset_title_prefix + ": " + args.dataset_title
 	
 def export_shapefile():
 	"""Exports the feature class as a zipped shapefile
@@ -439,7 +456,17 @@ def update_dataset_version():
 		info(" Dataset " + dataset_id + " not found on OpenColorado")
 
 def get_remote_dataset(dataset_id):
+	"""Gets the dataset from CKAN repository
 
+	Parameters:
+		dataset_id - A string representing the unique dataset name
+	
+	Returns:
+        An object structured the same as the JSON dataset output from
+        the CKAN REST API. For more information on the structure look at the
+        web service JSON output, or reference:
+        http://docs.ckan.org/en/latest/api-v2.html#model-api
+	"""
 	dataset_entity = None
 
 	try:
@@ -453,11 +480,35 @@ def get_remote_dataset(dataset_id):
 	return dataset_entity
 		
 def create_local_dataset(dataset_id):
+	"""Creates a new dataset entity, but does not commit it to CKAN
 
-	info(" New Dataset " + dataset_id + " being created on OpenColorado")
+	Parameters:
+		dataset_id - A string representing the unique dataset name
+	
+	Returns:
+        An object structured the same as the JSON dataset output from
+        the CKAN REST API. For more information on the structure look at the
+        web service JSON output, or reference:
+        http://docs.ckan.org/en/latest/api-v2.html#model-api
+	"""	
+
+	global args, ckan_client	
+
+	info(' New Dataset ' + dataset_id + ' being initialized')
 	dataset_entity = {};
 	dataset_entity['name'] = dataset_id
-	dataset_entity['license_id'] = 'cc-zero'	
+	dataset_entity['license_id'] = 'cc-zero'
+	dataset_entity['title'] = get_dataset_title()
+
+	# Find the correct CKAN group id to assign the dataset to
+	try:
+		group_entity = ckan_client.group_entity_get(args.ckan_group_name)
+		if group_entity is not None:
+			info(' Adding dataset to group: ' + args.ckan_group_name)		
+			dataset_entity['groups'] = [group_entity['id']]
+	except ckanclient.CkanApiNotFoundError:
+		info(' Group: ' + args.ckan_group_name + ' not found on OpenColorado')
+		dataset_entity['groups'] = []		
 
 	return dataset_entity
 		
@@ -510,10 +561,11 @@ def update_local_dataset_from_metadata(dataset_entity):
 	# Specify the namespaces
 	ns_gmd = "{http://www.isotc211.org/2005/gmd}"
 	ns_gco = "{http://www.isotc211.org/2005/gco}"
-
-	# Get the dataset title
-	title = args.ckan_dataset_title_prefix + ": " + args.dataset_title
 	
+	# Update the dataset title
+	title = get_dataset_title()
+	dataset_entity['title'] = title	
+
 	# Get the dataset description
 	xpath_description = '//{0}identificationInfo/{0}MD_DataIdentification/{0}citation/{0}CI_Citation/{0}title/{1}CharacterString'.format(ns_gmd,ns_gco);
 	description = metadata_xml.find(xpath_description).text
@@ -550,7 +602,6 @@ def update_local_dataset_from_metadata(dataset_entity):
 	author_email = metadata_xml.find(xpath_author_email).text
 	
 	# Update the dataset attributes from the ArcGIS Metadata
-	dataset_entity['title'] = title
 	dataset_entity['notes'] = abstract
 	dataset_entity['tags'] = keywords
 	dataset_entity['maintainer'] = maintainer
@@ -586,10 +637,6 @@ def update_local_dataset_from_metadata(dataset_entity):
 		
 	dataset_entity['resources'] = resources;
 	
-	# Update the CKAN groups the dataset belongs to
-	group_list = ckan_client.group_register_get()
-	dataset_entity['groups'] = group_list
-
 	return dataset_entity
 
 def update_remote_dataset(dataset_entity):
