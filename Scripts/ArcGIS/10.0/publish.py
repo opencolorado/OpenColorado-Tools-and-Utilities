@@ -42,7 +42,7 @@
 #	 already exists, it is updated. 
 #
 # 4) Updates the version (revision) number of the dataset on the OpenColorado
-#     Data Catalog (if it already exists)
+#    Data Catalog (if it already exists)
 # ---------------------------------------------------------------------------
 
 # Import system modules
@@ -54,7 +54,7 @@ args = None
 output_folder = None
 source_feature_class = None
 ckan_client = None
-temp_folder = "temp"
+temp_workspace = None
 
 def main():
 	"""Main function
@@ -62,7 +62,7 @@ def main():
 	Returns:
         None
 	"""
-	global args, output_folder, source_feature_class
+	global args, output_folder, source_feature_class, temp_workspace
 	
 	parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
 			
@@ -70,7 +70,12 @@ def main():
 	parser.add_argument('-o', '--output-folder',
 		action='store', 
 		dest='output_folder',
-		help='The root output folder in which to create the published files.  Sub-folders will automatically be created for each dataset (ex. C:\\\\temp).')
+		help='The root output folder in which to create the published files.  Sub-folders will automatically be created for each dataset (ex. \\\\myserver\\OpenDataCatalog).')
+
+	parser.add_argument('-w', '--temp-workspace',
+		action='store', 
+		dest='temp_workspace',
+		help='The root workspace folder in which to create temporary output files. A local workspace will increase performance. (ex. C:\\temp).')
 	
 	parser.add_argument('-d', '--download-url',
 		action='store', 
@@ -161,6 +166,10 @@ def main():
 	# Set the global output folder (trim and append a slash to make sure the files get created inside the directory)
 	if args.output_folder != None:
 		output_folder = args.output_folder.strip()
+
+	# Set the global temp workspace folder (trim and append a slash to make sure the files get created inside the directory)
+	if args.temp_workspace != None:
+		temp_workspace = args.temp_workspace.strip()		
 	
 	# Set the source feature class
 	if args.source_workspace == None:
@@ -177,11 +186,11 @@ def main():
 	debug(' Dataset name: ' + args.dataset_name)
 	debug(' Publish folder: ' + output_folder)
 						
-	# Create the dataset folder
-	create_dataset_folder()
+	# Create the dataset folder and update the output folder
+	output_folder = create_dataset_folder()
 	
-	# Create temporary folder for processing
-	create_dataset_temp_folder()
+	# Create temporary folder for processing and update the temp workspace folder
+	temp_workspace = create_dataset_temp_folder()
 
 	# Export to the various file formats
 	if 'shp' in args.formats:
@@ -261,10 +270,12 @@ def create_dataset_folder():
 	Creates the output folder if it does not exist.
 
 	Returns:
-	    None
+		The name of the path
 	"""
 	directory = os.path.join(output_folder,get_dataset_filename())
 	create_folder(directory)
+	
+	return directory
 
 def create_dataset_temp_folder():
 	"""Creates a temporary folder for processing data
@@ -272,10 +283,14 @@ def create_dataset_temp_folder():
 	Creates the temporary folder if it does not exist.
 
 	Returns:
-        None
+        The name of the path
 	"""
-	directory = os.path.join(output_folder,get_dataset_filename(),temp_folder)
+	global temp_workspace
+	
+	directory = os.path.join(temp_workspace,get_dataset_filename())
 	create_folder(directory)
+		
+	return directory
 
 def delete_dataset_temp_folder():
 	"""Deletes the temporary folder for processing data
@@ -283,7 +298,9 @@ def delete_dataset_temp_folder():
 	Returns:
         None
 	"""
-	directory = os.path.join(output_folder,get_dataset_filename(),temp_folder)
+	global temp_workspace
+	
+	directory = os.path.join(temp_workspace)
 	if os.path.exists(directory):
 		debug('Deleting directory "' + directory)
 		shutil.rmtree(directory)
@@ -294,10 +311,8 @@ def publish_file(directory, file_name, file_type):
 	Returns:
         None
 	"""
-	
-	folder = create_folder(os.path.join(output_folder,get_dataset_filename()))
-	
-	folder = create_folder(os.path.join(folder,file_type))
+
+	folder = create_folder(os.path.join(output_folder,file_type))
 	
 	info(' Copying ' + file_name + ' to ' + folder)
 	shutil.copyfile(os.path.join(directory,file_name), os.path.join(folder,file_name))
@@ -332,15 +347,16 @@ def export_shapefile():
 	name = get_dataset_filename()
 	
 	# Create a shape folder in the temp directory if it does not exist
-	working_folder = os.path.join(output_folder,name,temp_folder,folder)
-	create_folder(working_folder, True)
-
-	# Create a folder for the shapefile (since it is a folder)
-	create_folder(os.path.join(working_folder,name))
+	temp_working_folder = os.path.join(temp_workspace,folder)
+	create_folder(temp_working_folder, True)
 	
+	# Create a folder for the shapefile (put in in a folder to zip)
+	zip_folder = os.path.join(temp_working_folder,name)
+	create_folder(zip_folder)
+
 	# Export the shapefile to the folder
 	source = source_feature_class
-	destination = os.path.join(working_folder,name,name + ".shp")
+	destination = os.path.join(zip_folder,name + ".shp")
 	
 	# Export the shapefile
 	debug(' - Exporting to shapefile from "' + source + '" to "' + destination + '"')
@@ -348,15 +364,15 @@ def export_shapefile():
 	
 	# Zip up the files
 	debug(' - Zipping the shapefile')
-	zip_file = zipfile.ZipFile(os.path.join(working_folder,name + ".zip"), "w")
+	zip_file = zipfile.ZipFile(os.path.join(temp_working_folder,name + ".zip"), "w")
 	
-	for filename in glob.glob(working_folder + "/" + name + "/*"):
+	for filename in glob.glob(temp_working_folder + "/*"):
 		zip_file.write(filename, os.path.basename(filename), zipfile.ZIP_DEFLATED)
 		
 	zip_file.close()
 	
 	# Publish the zipfile to the download folder
-	publish_file(working_folder, name + ".zip","shape")
+	publish_file(temp_working_folder, name + ".zip","shape")
 	
 def export_cad():
 	"""Exports the feature class as a CAD drawing file
@@ -368,19 +384,19 @@ def export_cad():
 	name = get_dataset_filename()
 	
 	# Create a cad folder in the temp directory if it does not exist
-	working_folder = os.path.join(output_folder,name,temp_folder,folder)
-	create_folder(working_folder, True)
+	temp_working_folder = os.path.join(temp_workspace,folder)
+	create_folder(temp_working_folder, True)
 	
 	# Export the shapefile to the folder
 	source = source_feature_class
-	destination = os.path.join(working_folder,name + ".dwg")
+	destination = os.path.join(temp_working_folder,name + ".dwg")
 	
 	# Export the drawing file
 	debug(' - Exporting to DWG file from "' + source + '" to "' + destination + '"')
 	arcpy.ExportCAD_conversion(source, "DWG_R2000", destination, "Ignore_Filenames_in_Tables", "Overwrite_Existing_Files", "")
 	
 	# Publish the zipfile to the download folder
-	publish_file(working_folder, name + ".dwg","cad")
+	publish_file(temp_working_folder, name + ".dwg","cad")
 		
 def export_kml():
 	"""Exports the feature class to a kml file
@@ -394,14 +410,14 @@ def export_kml():
 	name = get_dataset_filename()
 	
 	# Create a kml folder in the temp directory if it does not exist
-	working_folder = os.path.join(output_folder,name,temp_folder,folder)
-	create_folder(working_folder, True)
+	temp_working_folder = os.path.join(temp_workspace,folder)
+	create_folder(temp_working_folder, True)
 	
 	# Export the feature class to a temporary file gdb
 	source = source_feature_class
-	destination = os.path.join(working_folder,name + ".kmz")
+	destination = os.path.join(temp_working_folder,name + ".kmz")
 	
-	gdb_temp = os.path.join(working_folder,name + ".gdb")
+	gdb_temp = os.path.join(temp_working_folder,name + ".gdb")
 	gdb_feature_class = os.path.join(gdb_temp,name)
 	
 	debug(' - Creating temporary file geodatabase for processing:' + gdb_temp)
@@ -430,7 +446,7 @@ def export_kml():
 	arcpy.Delete_management(gdb_temp)
 	
 	# Publish the zipfile to the download folder
-	publish_file(working_folder, name + ".kmz","kml")
+	publish_file(temp_working_folder, name + ".kmz","kml")
 
 def update_dataset_version():
 	"""Updates the dataset version number on CKAN repository
@@ -543,22 +559,22 @@ def update_local_dataset_from_metadata(dataset_entity):
 	name = get_dataset_filename()
 	
 	# Create a kml folder in the temp directory if it does not exist
-	working_folder = os.path.join(output_folder,name,temp_folder,folder)
-	create_folder(working_folder, True)
+	temp_working_folder = os.path.join(temp_workspace,folder)
+	create_folder(temp_working_folder, True)
 	
 	# Set the destinion of the metadata export
 	source = source_feature_class
-	destination = os.path.join(working_folder,name + ".xml")
+	destination = os.path.join(temp_working_folder,name + ".xml")
 	
 	# Export the metadata
-	arcpy.env.workspace = "C:/temp"
+	arcpy.env.workspace = temp_working_folder
 	installDir = arcpy.GetInstallInfo("desktop")["InstallDir"]
 	translator = installDir + "Metadata/Translator/ESRI_ISO2ISO19139.xml"
 	
 	arcpy.ExportMetadata_conversion(source, translator, destination)
 	
 	# Publish the metadata to the download folder
-	publish_file(working_folder, name + ".xml","metadata")
+	publish_file(temp_working_folder, name + ".xml","metadata")
 	
 	# Open the file and read in the xml
 	metadata_file = open(destination,"r")
@@ -749,3 +765,4 @@ def log(message):
 #Execute main function	
 if __name__ == '__main__':
 	main()
+	
