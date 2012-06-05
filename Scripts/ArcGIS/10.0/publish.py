@@ -205,9 +205,8 @@ def main():
 		info('Exporting to kml file')
 		export_kml()
 	
-	# Update the dataset information on the CKAN repository from the metadata
-	if args.update_from_metadata != None:
-		publish_to_ckan()
+	# Update the dataset information on the CKAN repository
+	publish_to_ckan()
 	
 	# Delete the dataset temp folder
 	delete_dataset_temp_folder()
@@ -233,14 +232,14 @@ def publish_to_ckan():
 	
 	# Check to see if the dataset exists on CKAN or not
 	if dataset_entity is None:
-		# Create a new dataset in CKAN
-		dataset_entity = create_local_dataset(dataset_id)
-		dataset_entity = update_local_dataset_from_metadata(dataset_entity)
-		create_remote_dataset(dataset_entity)
+
+		# Create a new dataset
+		create_dataset(dataset_id)
+		
 	else:
-		# Update existing dataset in CKAN
-		dataset_entity = update_local_dataset_from_metadata(dataset_entity)
-		update_remote_dataset(dataset_entity)
+		
+		# Update an existing dataset
+		update_dataset(dataset_entity)
 
 	# Update the dataset version on the CKAN repository (causes the last modified date to be updated)
 	if args.increment != "none":
@@ -448,34 +447,23 @@ def export_kml():
 	# Publish the zipfile to the download folder
 	publish_file(temp_working_folder, name + ".kmz","kml")
 
-def update_dataset_version():
-	"""Updates the dataset version number on CKAN repository
+def replace_literal_nulls(feature_layer):
+	"""Replaces <Null> with empty string in data fields
+	
+	Parameters:
+		feature_layer - The name of the ArcGIS dataset to replace values in
 	
 	Returns:
         None
-	"""	
-	global args
+	"""
+	debug(' - Replacing <Null> with empty string in all string fields')
+	fieldList = arcpy.ListFields(feature_layer)
 	
-	# Initialize CKAN client
-	ckan = ckanclient.CkanClient(base_location=args.ckan_api,api_key=args.ckan_api_key)
-	
-	# Create the name of the dataset on the CKAN instance
-	dataset_id = args.ckan_dataset_name_prefix + args.dataset_name
-	
-	try:
-		# Get the dataset
-		dataset_entity = ckan.package_entity_get(dataset_id)
-		
-		# Increment the version number
-		version = dataset_entity['version']
-		version = increment_version(version, args.increment)
-		dataset_entity['version'] = version
-		
-		# Update the dataset
-		ckan.package_entity_put(dataset_entity)
-		
-	except ckanclient.CkanApiNotFoundError:
-		info(" Dataset " + dataset_id + " not found on OpenColorado")
+	for field in fieldList:
+		if field.type == 'String':
+			debug(' - Replacing <Null> with empty string in field: ' + field.name)
+			expression = '!' + field.name + '!.replace("<Null>","")'
+			arcpy.CalculateField_management(feature_layer, field.name, expression,"PYTHON")
 
 def get_remote_dataset(dataset_id):
 	"""Gets the dataset from CKAN repository
@@ -500,6 +488,29 @@ def get_remote_dataset(dataset_id):
 		info(" Dataset " + dataset_id + " not found on OpenColorado")
 
 	return dataset_entity
+
+def create_dataset(dataset_id):
+	"""Creates a new dataset and registers it to CKAN
+
+	Parameters:
+		dataset_id - A string representing the unique dataset name
+	
+	Returns:
+		None
+	"""	
+	
+	# Create a new dataset locally		
+	dataset_entity = create_local_dataset(dataset_id)
+	
+	# Update the dataset's resources (download links)
+	dataset_entity = update_dataset_resources(dataset_entity)
+	
+	# Update the dataset from ArcGIS Metadata if configured
+	if args.update_from_metadata != None:
+		dataset_entity = update_local_dataset_from_metadata(dataset_entity)
+	
+	# Create a new dataset in CKAN
+	create_remote_dataset(dataset_entity)
 		
 def create_local_dataset(dataset_id):
 	"""Creates a new dataset entity, but does not commit it to CKAN
@@ -533,6 +544,163 @@ def create_local_dataset(dataset_id):
 		dataset_entity['groups'] = []		
 
 	return dataset_entity
+
+def create_remote_dataset(dataset_entity):
+	"""Creates a new remote CKAN dataset.
+	   The dataset does not yet exists in the CKAN repository, it is created.
+	
+	Parameters:
+        dataset_entity - An object structured the same as the JSON dataset 
+        output from the CKAN REST API. For more information on the structure 
+        look at the web service JSON output, or reference:
+        http://docs.ckan.org/en/latest/api-v2.html#model-api
+    
+    Returns:
+    	None
+	"""	
+	global ckan_client	
+
+	# Create a new dataset on OpenColorado 
+	ckan_client.package_register_post(dataset_entity)
+
+def update_dataset(dataset_entity):
+	"""Updates an existing dataset and commits changes to CKAN
+
+	Parameters:
+        dataset_entity - An object structured the same as the JSON dataset 
+        output from the CKAN REST API. For more information on the structure 
+        look at the web service JSON output, or reference:
+        http://docs.ckan.org/en/latest/api-v2.html#model-api
+	
+	Returns:
+		None
+	"""	
+	
+	# Update the dataset's resources (download links)
+	dataset_entity = update_dataset_resources(dataset_entity)		
+
+	# Update the dataset from ArcGIS Metadata if configured
+	if args.update_from_metadata != None:
+		dataset_entity = update_local_dataset_from_metadata(dataset_entity)
+
+	# Update existing dataset in CKAN		
+	update_remote_dataset(dataset_entity)
+
+def update_dataset_resources(dataset_entity):
+	"""Updates the CKAN dataset entity resources. If the resources already
+	   exist in the CKAN repository, they updated (preserving the original 
+	   unique resource ID). If the resource does not already exist,
+	   a new one is created. 
+	   
+	Parameters:
+		dataset_entity - An object structured the same as the JSON dataset output from
+		the CKAN REST API. For more information on the structure look at the
+		web service JSON output, or reference:
+		http://docs.ckan.org/en/latest/api-v2.html#model-api
+	
+	Returns:
+        An object structured the same as the JSON dataset output from
+        the CKAN REST API. For more information on the structure look at the
+        web service JSON output, or reference:
+        http://docs.ckan.org/en/latest/api-v2.html#model-api
+	"""		
+	global args, ckan_client
+	
+	# Initialize an empty array of resources
+	resources = []
+	
+	# If the dataset has existing resources, update them
+	if (dataset_entity['resources'] is not None):
+		resources = dataset_entity['resources']
+	
+	# Construct the file resource download urls
+	dataset_file_name = get_dataset_filename() 
+	
+	# Get the dataset title
+	title = get_dataset_title()	
+	
+	# Export to the various file formats
+	if 'shp' in args.formats:
+		
+		shp_resource = get_resource_by_format(resources, 'shp')
+		
+		if (shp_resource is None):
+			info('Creating new SHP resource')
+			shp_resource = {}
+			resources.append(shp_resource)
+		else:			
+			info('Updating SHP resource')
+		
+		shp_resource['name'] = args.dataset_title + ' - SHP'
+		shp_resource['description'] = title + ' - SHP'
+		shp_resource['url'] = args.download_url + dataset_file_name + '/shape/' + dataset_file_name + '.zip'
+		shp_resource['mimetype'] = 'application/zip'
+		shp_resource['format'] = 'SHP'
+	
+	if 'dwg' in args.formats:
+
+		dwg_resource = get_resource_by_format(resources, 'dwg')
+		
+		if (dwg_resource is None):
+			info('Creating new DWG resource')
+			dwg_resource = {}
+			resources.append(dwg_resource)		
+		else:			
+			info('Updating DWG resource')
+		
+		dwg_resource['name'] = args.dataset_title + ' - DWG'
+		dwg_resource['description'] = title + ' - DWG'
+		dwg_resource['url'] = args.download_url + dataset_file_name + '/cad/' + dataset_file_name + '.dwg'
+		dwg_resource['mimetype'] = 'application/acad'
+		dwg_resource['format'] = 'DWG'	
+
+	if 'kml' in args.formats:
+		
+		kml_resource = get_resource_by_format(resources, 'kml')
+		
+		if (kml_resource is None):
+			info('Creating new KML resource')		
+			kml_resource = {}
+			resources.append(kml_resource)
+		else:			
+			info('Updating KML resource')
+
+		kml_resource['name'] = args.dataset_title + ' - KML'
+		kml_resource['description'] = title + ' - KML'
+		kml_resource['url'] = args.download_url + dataset_file_name + '/kml/' + dataset_file_name + '.kmz'
+		kml_resource['mimetype'] = 'application/vnd.google-earth.kmz'
+		kml_resource['format'] = 'KML'
+					
+	# Update the resources on the dataset					
+	dataset_entity['resources'] = resources;
+	
+	return dataset_entity
+
+def get_resource_by_format(resources, format_type):
+	"""Searches an array of resources to find the resource that
+	   matches the file format type passed in. Returns the resource
+	   if found. 
+	   
+	Parameters:
+		resources - An array of CKAN dataset resources 
+		For more information on the structure look at the
+		web service JSON output, or reference:
+		http://docs.ckan.org/en/latest/api-v2.html#model-api
+		format_type - A string with the file format type to find (SHP, KML..)
+	
+	Returns:
+		resource - A CKAN dataset resource if found. None if not found. 
+		For more information on the structure look at the
+		web service JSON output, or reference:
+		http://docs.ckan.org/en/latest/api-v2.html#model-api
+	"""		
+	
+	for resource in resources:
+		current_format = resource['format']
+		if (str(current_format).strip().upper() == format_type.strip().upper()):
+			return resource
+	
+	return None 
 		
 def update_local_dataset_from_metadata(dataset_entity):
 	"""Updates the CKAN dataset entity by reading in metadata
@@ -631,34 +799,6 @@ def update_local_dataset_from_metadata(dataset_entity):
 	dataset_entity['author'] = author
 	dataset_entity['author_email'] = author_email
 
-	# Construct the file resource download urls   
-	dataset_name = get_dataset_filename()   
-	resources = [
-		{
-			'name': title + ' - KML',
-			'description': description + ' - KML',
-			'url': args.download_url + dataset_name + '/kml/' + dataset_name + '.kmz',
-			'mimetype': 'application/vnd.google-earth.kmz',
-			'format': 'KML'
-		},
-		{
-			'name': title + ' - Shapefile',
-			'description': description + ' - Shapefile',			
-			'url': args.download_url + dataset_name + '/shape/' + dataset_name + '.zip',
-			'mimetype': 'application/zip',			
-			'format': 'SHP'
-		},
-		{
-			'name': title + ' - AutoCAD DWG',
-			'description': description + ' - AutoCAD DWG',
-			'url': args.download_url + dataset_name + '/cad/' + dataset_name + '.dwg',
-			'mimetype': 'application/acad',
-			'format': 'DWG'
-		}
-	]
-		
-	dataset_entity['resources'] = resources;
-	
 	return dataset_entity
 
 def update_remote_dataset(dataset_entity):
@@ -677,24 +817,35 @@ def update_remote_dataset(dataset_entity):
 	global ckan_client
 	
 	ckan_client.package_entity_put(dataset_entity)
-		
-def create_remote_dataset(dataset_entity):
-	"""Creates a new remote CKAN dataset.
-	   The dataset does not yet exists in the CKAN repository, it is created.
-	
-	Parameters:
-        dataset_entity - An object structured the same as the JSON dataset 
-        output from the CKAN REST API. For more information on the structure 
-        look at the web service JSON output, or reference:
-        http://docs.ckan.org/en/latest/api-v2.html#model-api
-    
-    Returns:
-    	None
-	"""	
-	global ckan_client	
 
-	# Create a new dataset on OpenColorado 
-	ckan_client.package_register_post(dataset_entity)		
+def update_dataset_version():
+	"""Updates the dataset version number on CKAN repository
+	
+	Returns:
+        None
+	"""	
+	global args
+	
+	# Initialize CKAN client
+	ckan = ckanclient.CkanClient(base_location=args.ckan_api,api_key=args.ckan_api_key)
+	
+	# Create the name of the dataset on the CKAN instance
+	dataset_id = args.ckan_dataset_name_prefix + args.dataset_name
+	
+	try:
+		# Get the dataset
+		dataset_entity = ckan.package_entity_get(dataset_id)
+		
+		# Increment the version number
+		version = dataset_entity['version']
+		version = increment_version(version, args.increment)
+		dataset_entity['version'] = version
+		
+		# Update the dataset
+		ckan.package_entity_put(dataset_entity)
+		
+	except ckanclient.CkanApiNotFoundError:
+		info(" Dataset " + dataset_id + " not found on OpenColorado")
 
 def increment_version(version, increment_type):
 	"""Increments the version number
@@ -730,25 +881,6 @@ def increment_version(version, increment_type):
 			info ('Incrementing CKAN dataset version from ' + version + ' to ' + incremented_version);
 	return incremented_version
 
-def replace_literal_nulls(feature_layer):
-	"""Replaces <Null> with empty string in data fields
-	
-	Parameters:
-		feature_layer - The name of the ArcGIS dataset to replace values in
-	
-	Returns:
-        None
-	"""
-	debug(' - Replacing <Null> with empty string in all string fields')
-	fieldList = arcpy.ListFields(feature_layer)
-	
-	
-	for field in fieldList:
-		if field.type == 'String':
-			debug(' - Replacing <Null> with empty string in field: ' + field.name)
-			expression = '!' + field.name + '!.replace("<Null>","")'
-			arcpy.CalculateField_management(feature_layer, field.name, expression,"PYTHON")
-	
 def debug(message) :
 	global args
 	if args.verbose:
