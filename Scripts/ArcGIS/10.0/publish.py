@@ -14,7 +14,7 @@
 #    a. Shapefile (zipped)
 #    b. CAD (dwg file)
 #    c. KML (zipped KMZ)
-#	 d. ArcGIS Metadata (xml)
+#	 d. Metadata (xml)
 #
 # 	 The script automatically manages the creation of output folders if they
 #    do not already exist.  Also creates temp folders for processing as
@@ -91,8 +91,8 @@ def main():
 	parser.add_argument('-f',
 		action='append',
 		dest='formats', 
-		choices=['shp','dwg','kml'],
-		help='Specific formats to publish (shp=Shapefile, dwg=CAD drawing file, kml=Keyhole Markup Language).  If not specified all formats will be published.')
+		choices=['shp','dwg','kml','metadata'],
+		help='Specific formats to publish (shp=Shapefile, dwg=CAD drawing file, kml=Keyhole Markup Language, metadata=Metadata).  If not specified all formats will be published.')
 		
 	parser.add_argument('-a', '--ckan-api',
 		action='store', 
@@ -179,8 +179,8 @@ def main():
 			
 	# If no formats are specified then enable all formats
 	if args.formats == None:
-		args.formats = 'shp','dwg','kml'
-				
+		args.formats = 'shp','dwg','kml','metadata'
+
 	info('Starting ' + sys.argv[0])
 	debug(' Feature class: ' + source_feature_class)
 	debug(' Dataset name: ' + args.dataset_name)
@@ -204,6 +204,10 @@ def main():
 	if 'kml' in args.formats:
 		info('Exporting to kml file')
 		export_kml()
+		
+	if 'metadata' in args.formats:
+		info('Exporting metadata XML file')
+		export_metadata()
 	
 	# Update the dataset information on the CKAN repository
 	publish_to_ckan()
@@ -446,6 +450,34 @@ def export_kml():
 	
 	# Publish the zipfile to the download folder
 	publish_file(temp_working_folder, name + ".kmz","kml")
+	
+def export_metadata():
+	"""Exports the feature class metadata to an xml file
+	
+	Returns:
+        None
+	"""	
+	
+	folder = 'metadata'
+	name = get_dataset_filename()
+	
+	# Create a kml folder in the temp directory if it does not exist
+	temp_working_folder = os.path.join(temp_workspace,folder)
+	create_folder(temp_working_folder, True)
+	
+	# Set the destinion of the metadata export
+	source = source_feature_class
+	destination = os.path.join(temp_working_folder,name + ".xml")
+	
+	# Export the metadata
+	arcpy.env.workspace = temp_working_folder
+	installDir = arcpy.GetInstallInfo("desktop")["InstallDir"]
+	translator = installDir + "Metadata/Translator/ESRI_ISO2ISO19139.xml"
+	
+	arcpy.ExportMetadata_conversion(source, translator, destination)
+	
+	# Publish the metadata to the download folder
+	publish_file(temp_working_folder, name + ".xml","metadata")
 
 def replace_literal_nulls(feature_layer):
 	"""Replaces <Null> with empty string in data fields
@@ -506,7 +538,7 @@ def create_dataset(dataset_id):
 	dataset_entity = update_dataset_resources(dataset_entity)
 	
 	# Update the dataset from ArcGIS Metadata if configured
-	if args.update_from_metadata != None:
+	if (args.update_from_metadata != None and 'metadata' in args.formats):
 		dataset_entity = update_local_dataset_from_metadata(dataset_entity)
 	
 	# Create a new dataset in CKAN
@@ -580,7 +612,7 @@ def update_dataset(dataset_entity):
 	dataset_entity = update_dataset_resources(dataset_entity)		
 
 	# Update the dataset from ArcGIS Metadata if configured
-	if args.update_from_metadata != None:
+	if (args.update_from_metadata != None and 'metadata' in args.formats):
 		dataset_entity = update_local_dataset_from_metadata(dataset_entity)
 
 	# Update existing dataset in CKAN		
@@ -670,6 +702,23 @@ def update_dataset_resources(dataset_entity):
 		kml_resource['url'] = args.download_url + dataset_file_name + '/kml/' + dataset_file_name + '.kmz'
 		kml_resource['mimetype'] = 'application/vnd.google-earth.kmz'
 		kml_resource['format'] = 'KML'
+
+	if 'metadata' in args.formats:
+		
+		metadata_resource = get_resource_by_format(resources, 'XML')
+		
+		if (metadata_resource is None):
+			info('Creating new Metadata resource')		
+			metadata_resource = {}
+			resources.append(metadata_resource)
+		else:			
+			info('Updating Metadata resource')
+
+		metadata_resource['name'] = args.dataset_title + ' - Metadata'
+		metadata_resource['description'] = title + ' - Metadata'
+		metadata_resource['url'] = args.download_url + dataset_file_name + '/metadata/' + dataset_file_name + '.xml'
+		metadata_resource['mimetype'] = 'application/xml'
+		metadata_resource['format'] = 'XML'
 					
 	# Update the resources on the dataset					
 	dataset_entity['resources'] = resources;
@@ -701,7 +750,7 @@ def get_resource_by_format(resources, format_type):
 			return resource
 	
 	return None 
-		
+			
 def update_local_dataset_from_metadata(dataset_entity):
 	"""Updates the CKAN dataset entity by reading in metadata
 	   from the ArcGIS Metadata xml file. If the dataset already
@@ -720,32 +769,16 @@ def update_local_dataset_from_metadata(dataset_entity):
         the CKAN REST API. For more information on the structure look at the
         web service JSON output, or reference:
         http://docs.ckan.org/en/latest/api-v2.html#model-api
-	"""		
-	global args, ckan_client
-	
+	"""
+		
+	# Reconstruct the name of the file
 	folder = 'metadata'
 	name = get_dataset_filename()
-	
-	# Create a kml folder in the temp directory if it does not exist
 	temp_working_folder = os.path.join(temp_workspace,folder)
-	create_folder(temp_working_folder, True)
-	
-	# Set the destinion of the metadata export
-	source = source_feature_class
-	destination = os.path.join(temp_working_folder,name + ".xml")
-	
-	# Export the metadata
-	arcpy.env.workspace = temp_working_folder
-	installDir = arcpy.GetInstallInfo("desktop")["InstallDir"]
-	translator = installDir + "Metadata/Translator/ESRI_ISO2ISO19139.xml"
-	
-	arcpy.ExportMetadata_conversion(source, translator, destination)
-	
-	# Publish the metadata to the download folder
-	publish_file(temp_working_folder, name + ".xml","metadata")
+	file_path = os.path.join(temp_working_folder,name + ".xml")
 	
 	# Open the file and read in the xml
-	metadata_file = open(destination,"r")
+	metadata_file = open(file_path,"r")
 	metadata_xml = et.parse(metadata_file)
 
 	# Specify the namespaces
@@ -756,10 +789,6 @@ def update_local_dataset_from_metadata(dataset_entity):
 	title = get_dataset_title()
 	dataset_entity['title'] = title	
 
-	# Get the dataset description
-	xpath_description = '//{0}identificationInfo/{0}MD_DataIdentification/{0}citation/{0}CI_Citation/{0}title/{1}CharacterString'.format(ns_gmd,ns_gco);
-	description = metadata_xml.find(xpath_description).text
-	
 	# Get the abstract
 	xpath_abstract = '{0}identificationInfo/{0}MD_DataIdentification/{0}abstract/{1}CharacterString'.format(ns_gmd,ns_gco);
 	abstract = metadata_xml.find(xpath_abstract).text
