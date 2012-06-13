@@ -130,7 +130,7 @@ def main():
 		default='cc-zero',
 		help='The default data license type for the dataset.')
 	
-	parser.add_argument('-i',
+	parser.add_argument('-i', '--ckan-increment-version',
 		action='store', 
 		dest='increment',
 		choices=['major','minor','revision','none'],
@@ -642,7 +642,7 @@ def update_dataset_resources(dataset_entity):
 	resources = []
 	
 	# If the dataset has existing resources, update them
-	if (dataset_entity['resources'] is not None):
+	if ('resources' in dataset_entity):
 		resources = dataset_entity['resources']
 	
 	# Construct the file resource download urls
@@ -794,10 +794,19 @@ def update_local_dataset_from_metadata(dataset_entity):
 	abstract = metadata_xml.find(xpath_abstract).text
 	debug ('Abstract from metadata: ' + abstract);
 	
-	# Get the keywords
+	# Create the keywords
+	keywords = []
+	
+	# If the dataset has existing tags, check for the 'featured'
+	# tag and preserve it if it exists
+	if ('tags' in dataset_entity):
+		if ('featured' in dataset_entity['tags']):
+			keywords.append('featured')
+			debug ('Preserving featured dataset tag');
+
+	# Get the keywords from the ArcGIS Metadata
 	xpath_keywords = '//{0}MD_Keywords/{0}keyword/{1}CharacterString'.format(ns_gmd,ns_gco);
 	keyword_elements = metadata_xml.findall(xpath_keywords)
-	keywords = []
 	for keyword_element in keyword_elements:
 		keyword = keyword_element.text
 		keyword = keyword.lower().replace(' ','-')
