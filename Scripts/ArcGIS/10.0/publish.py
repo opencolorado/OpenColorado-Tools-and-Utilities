@@ -185,38 +185,49 @@ def main():
 	debug(' Feature class: ' + source_feature_class)
 	debug(' Dataset name: ' + args.dataset_name)
 	debug(' Publish folder: ' + output_folder)
+	
+	try:
 						
-	# Create the dataset folder and update the output folder
-	output_folder = create_dataset_folder()
-	
-	# Create temporary folder for processing and update the temp workspace folder
-	temp_workspace = create_dataset_temp_folder()
-
-	# Export to the various file formats
-	if 'shp' in args.formats:
-		info('Exporting to shapefile')
-		export_shapefile()
-	
-	if 'dwg' in args.formats:
-		info('Exporting to CAD drawing file')
-		export_cad()
-
-	if 'kml' in args.formats:
-		info('Exporting to kml file')
-		export_kml()
+		# Create the dataset folder and update the output folder
+		output_folder = create_dataset_folder()
 		
-	if 'metadata' in args.formats:
-		info('Exporting metadata XML file')
-		export_metadata()
+		# Create temporary folder for processing and update the temp workspace folder
+		temp_workspace = create_dataset_temp_folder()
 	
-	# Update the dataset information on the CKAN repository
-	publish_to_ckan()
+		# Export to the various file formats
+		if 'shp' in args.formats:
+			info('Exporting to shapefile')
+			export_shapefile()
+		
+		if 'dwg' in args.formats:
+			info('Exporting to CAD drawing file')
+			export_cad()
 	
-	# Delete the dataset temp folder
-	delete_dataset_temp_folder()
-	
-	info('Completed ' + sys.argv[0])
-
+		if 'kml' in args.formats:
+			info('Exporting to kml file')
+			export_kml()
+			
+		if 'metadata' in args.formats:
+			info('Exporting metadata XML file')
+			export_metadata()
+		
+		# Update the dataset information on the CKAN repository
+		publish_to_ckan()
+		
+		# Delete the dataset temp folder
+		delete_dataset_temp_folder()
+		
+		info('Completed ' + sys.argv[0])
+		
+	except:
+		if info:
+			info("Error! {0} {1}".format(sys.exc_info()[1], sys.exc_info()[0]))
+			info(arcpy.GetMessages(2))
+			info("Exiting program.")
+			
+		sys.exit(1)
+		
+		
 def publish_to_ckan():
 	"""Updates the dataset in the CKAN repository or creates a new dataset
 
@@ -369,7 +380,7 @@ def export_shapefile():
 	debug(' - Zipping the shapefile')
 	zip_file = zipfile.ZipFile(os.path.join(temp_working_folder,name + ".zip"), "w")
 	
-	for filename in glob.glob(temp_working_folder + "/*"):
+	for filename in glob.glob(zip_folder + "/*"):
 		zip_file.write(filename, os.path.basename(filename), zipfile.ZIP_DEFLATED)
 		
 	zip_file.close()
@@ -434,6 +445,7 @@ def export_kml():
 	debug(' - Generating KML file in memory from  "' + gdb_feature_class + '"')
 	arcpy.MakeFeatureLayer_management(gdb_feature_class, name, "", "")
 	
+	# Encode special characters that don't convert to KML correctly.
 	# Replace any literal nulls <Null> with empty as these don't convert to KML correctly
 	replace_literal_nulls(name)
 
@@ -479,24 +491,54 @@ def export_metadata():
 	# Publish the metadata to the download folder
 	publish_file(temp_working_folder, name + ".xml","metadata")
 
-def replace_literal_nulls(feature_layer):
-	"""Replaces <Null> with empty string in data fields
+def replace_literal_nulls(layer_name):
+	"""Replaces literal string representation of null, '<Null>', with a true null value 
+		(None in Python).
 	
 	Parameters:
-		feature_layer - The name of the ArcGIS dataset to replace values in
-	
+		layer_name - The name of the layer to replace literal nulls.
+		
 	Returns:
-        None
+		None
 	"""
-	debug(' - Replacing <Null> with empty string in all string fields')
-	fieldList = arcpy.ListFields(feature_layer)
+	debug(' - Start replacing literal nulls.')
 	
-	for field in fieldList:
-		if field.type == 'String':
-			debug(' - Replacing <Null> with empty string in field: ' + field.name)
-			expression = '!' + field.name + '!.replace("<Null>","")'
-			arcpy.CalculateField_management(feature_layer, field.name, expression,"PYTHON")
+	fields, row, rows = None, None, None
+	
+	try:
+			
+		# Create a list of field objects.
+		fields = arcpy.ListFields(layer_name)
+		
+		# Create an update cursor that will loop through and update each row.
+		rows = arcpy.UpdateCursor(layer_name)
+		
+		# Loop through each row and field and replace literal nulls.
+		for row in rows:
+			
+			for field in fields:
+				if field.type == 'String':
+					value = str(row.getValue(field.name))
+					
+					if (value.find('<Null>') > -1): 
 
+						debug(' - Found a "<Null>" string to nullify in field: {0}.'.format(field.name))
+						debug(' - Replacing null string')
+						row.setValue(field.name, None)
+						debug(' - Replaced with {0}'.format(value))
+						
+						# Update row
+						rows.updateRow(row)
+		
+		debug('Done replacing literal nulls in {0}.'.format(layer_name))
+			
+	finally: # Clean up
+		if row:
+			del row
+		if rows:
+			del rows
+		
+		
 def get_remote_dataset(dataset_id):
 	"""Gets the dataset from CKAN repository
 
@@ -790,11 +832,46 @@ def update_local_dataset_from_metadata(dataset_entity):
 	dataset_entity['title'] = title	
 
 	# Get the abstract
-	xpath_abstract = '{0}identificationInfo/{0}MD_DataIdentification/{0}abstract/{1}CharacterString'.format(ns_gmd,ns_gco);
-	abstract = metadata_xml.find(xpath_abstract).text
-	debug ('Abstract from metadata: ' + abstract);
-	
-	# Create the keywords
+	xpath_abstract = '{0}identificationInfo/{0}MD_DataIdentification/{0}abstract/{1}CharacterString'.format(ns_gmd,ns_gco)
+	abstract_element = metadata_xml.find(xpath_abstract)
+	if (abstract_element is not None):
+		dataset_entity['notes'] = abstract_element.text
+	else:
+		debug('No abstract found in metadata');
+
+	# Get the maintainer
+	xpath_maintainer= '//{0}distributionInfo/{0}MD_Distribution/{0}distributor/{0}MD_Distributor/{0}distributorContact/{0}CI_ResponsibleParty/{0}organisationName/{1}CharacterString'.format(ns_gmd,ns_gco);
+	maintainer_element = metadata_xml.find(xpath_maintainer)
+	if (maintainer_element != None):
+		dataset_entity['maintainer'] = maintainer_element.text
+	else:
+		debug('No maintainer found in metadata');
+
+	# Get the maintainer email
+	xpath_maintainer_email = '//{0}distributionInfo/{0}MD_Distribution/{0}distributor/{0}MD_Distributor/{0}distributorContact/{0}CI_ResponsibleParty/{0}contactInfo/{0}CI_Contact/{0}address/{0}CI_Address/{0}electronicMailAddress/{1}CharacterString'.format(ns_gmd,ns_gco);
+	maintainer_email_element = metadata_xml.find(xpath_maintainer_email)
+	if (maintainer_email_element != None):
+		dataset_entity['maintainer_email'] = maintainer_email_element.text
+	else:
+		debug('No maintainer email found in metadata');
+
+	# Get the author
+	xpath_author = '//{0}identificationInfo/{0}MD_DataIdentification/{0}pointOfContact/{0}CI_ResponsibleParty/{0}individualName/{1}CharacterString'.format(ns_gmd,ns_gco);
+	author_element = metadata_xml.find(xpath_author)
+	if (author_element != None):
+		dataset_entity['author'] = author_element.text
+	else:
+		debug('No author found in metadata');
+
+	# Get the author_email
+	xpath_author_email = '//{0}identificationInfo/{0}MD_DataIdentification/{0}pointOfContact/{0}CI_ResponsibleParty/{0}contactInfo/{0}CI_Contact/{0}address/{0}CI_Address/{0}electronicMailAddress/{1}CharacterString'.format(ns_gmd,ns_gco);
+	author_email_element = metadata_xml.find(xpath_author_email)
+	if (author_email_element != None):
+		dataset_entity['author_email'] = author_email_element.text
+	else:
+		debug('No author found in metadata');
+
+	# Get the keywords
 	keywords = []
 	
 	# If the dataset has existing tags, check for the 'featured'
@@ -813,29 +890,7 @@ def update_local_dataset_from_metadata(dataset_entity):
 		keywords.append(keyword)
 		debug ('Keywords found in metadata: ' + keyword);
 
-	# Get the maintainer
-	xpath_maintainer= '//{0}distributionInfo/{0}MD_Distribution/{0}distributor/{0}MD_Distributor/{0}distributorContact/{0}CI_ResponsibleParty/{0}organisationName/{1}CharacterString'.format(ns_gmd,ns_gco);
-	maintainer = metadata_xml.find(xpath_maintainer).text
-
-	# Get the maintainer email
-	xpath_maintainer_email = '//{0}distributionInfo/{0}MD_Distribution/{0}distributor/{0}MD_Distributor/{0}distributorContact/{0}CI_ResponsibleParty/{0}contactInfo/{0}CI_Contact/{0}address/{0}CI_Address/{0}electronicMailAddress/{1}CharacterString'.format(ns_gmd,ns_gco);
-	maintainer_email = metadata_xml.find(xpath_maintainer_email).text
-
-	# Get the author
-	xpath_author = '//{0}identificationInfo/{0}MD_DataIdentification/{0}pointOfContact/{0}CI_ResponsibleParty/{0}individualName/{1}CharacterString'.format(ns_gmd,ns_gco);
-	author = metadata_xml.find(xpath_author).text
-
-	# Get the author_email
-	xpath_author_email = '//{0}identificationInfo/{0}MD_DataIdentification/{0}pointOfContact/{0}CI_ResponsibleParty/{0}contactInfo/{0}CI_Contact/{0}address/{0}CI_Address/{0}electronicMailAddress/{1}CharacterString'.format(ns_gmd,ns_gco);
-	author_email = metadata_xml.find(xpath_author_email).text
-	
-	# Update the dataset attributes from the ArcGIS Metadata
-	dataset_entity['notes'] = abstract
 	dataset_entity['tags'] = keywords
-	dataset_entity['maintainer'] = maintainer
-	dataset_entity['maintainer_email'] = maintainer_email
-	dataset_entity['author'] = author
-	dataset_entity['author_email'] = author_email
 
 	return dataset_entity
 
