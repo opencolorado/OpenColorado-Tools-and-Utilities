@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# publish.py
+# PublishOpenDataset.py
 # ---------------------------------------------------------------------------
 # Publish a feature class from ArcSDE to the OpenColorado Data Catalog.
 # The publishing process creats output files in a variety of formats that 
@@ -55,6 +55,7 @@ output_folder = None
 source_feature_class = None
 ckan_client = None
 temp_workspace = None
+available_formats = ['shp','dwg','kml','metadata']
 
 def main():
 	"""Main function
@@ -88,10 +89,10 @@ def main():
 		required=True,
 		help='The source workspace to publish the feature class from (ex. Database Connections\\\\SDE Connection.sde).  Backslashes must be escaped as in the example.')	
 	
-	parser.add_argument('-f',
-		action='append',
+	parser.add_argument('-f', '--formats',
+		action='store',
 		dest='formats', 
-		choices=['shp','dwg','kml','metadata'],
+		default='shp,dwg,kml,metadata',
 		help='Specific formats to publish (shp=Shapefile, dwg=CAD drawing file, kml=Keyhole Markup Language, metadata=Metadata).  If not specified all formats will be published.')
 		
 	parser.add_argument('-a', '--ckan-api',
@@ -127,7 +128,7 @@ def main():
 	parser.add_argument('-l', '--ckan-license',
 		action='store', 
 		dest='ckan_license',
-		default='cc-zero',
+		default='cc-by',
 		help='The default data license type for the dataset.')
 	
 	parser.add_argument('-i', '--ckan-increment-version',
@@ -179,7 +180,14 @@ def main():
 			
 	# If no formats are specified then enable all formats
 	if args.formats == None:
-		args.formats = 'shp','dwg','kml','metadata'
+		args.formats = available_formats
+	else:
+		args.formats = args.formats.split(',')
+		
+		# Validate that the format types passed in are valid
+		for arg in args.formats:
+			if not arg in available_formats:
+				raise Exception(str.format("Format type: '{0}' not supported", arg))
 
 	info('Starting ' + sys.argv[0])
 	debug(' Feature class: ' + source_feature_class)
@@ -651,7 +659,13 @@ def update_dataset(dataset_entity):
 	"""	
 	
 	# Update the dataset's resources (download links)
-	dataset_entity = update_dataset_resources(dataset_entity)		
+	dataset_entity = update_dataset_resources(dataset_entity)
+	
+	# Update the dataset's licensing
+	dataset_entity['license_id'] = args.ckan_license
+	
+	# Update the dataset's title
+	dataset_entity['title'] = get_dataset_title()
 
 	# Update the dataset from ArcGIS Metadata if configured
 	if (args.update_from_metadata != None and 'metadata' in args.formats):
