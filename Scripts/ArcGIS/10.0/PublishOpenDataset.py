@@ -26,7 +26,7 @@
 #		    |- <dataset_name> (catalog dataset name with prefix removed, 
 #							   dashes replaced with underscores)
 #			    |- shape
-#				    |- <dataset_name>.shp
+#				    |- <dataset_name>.zip
 #		        |- cad
 #				    |- <dataset_name>.dwg
 #		        |- kml 
@@ -81,7 +81,7 @@ def main():
 	parser.add_argument('-d', '--download-url',
 		action='store', 
 		dest='download_url',
-		help='The root path to the data download repository. (ex. (ex. http://data.denvergov.org/)).')
+		help='The root path to the data download repository. (ex. http://data.denvergov.org/).')
 	
 	parser.add_argument('-s', '--source-workspace',
 		action='store', 
@@ -143,6 +143,12 @@ def main():
 		dest='update_from_metadata',
 		choices=['description','tags','all'],
 		help='Update dataset information using the source metadata')
+
+	parser.add_argument('-x', '--metadata-xslt',
+		action='store', 
+		dest='metadata_xslt',
+		default='..\StyleSheets\Format_FGDC.xslt',
+		help='The XSLT stylesheet to pass the FGDC CSDGM metadata through before publishing.')
 		
 	parser.add_argument('-v', '--verbose',
 		action='store_true', 
@@ -384,6 +390,12 @@ def export_shapefile():
 	debug(' - Exporting to shapefile from "' + source + '" to "' + destination + '"')
 	arcpy.CopyFeatures_management(source, destination, "", "0", "0", "0")
 	
+	# Delete the metadata file generate from the shapefile export
+	metadata_file_path = destination + ".xml"
+	if os.path.exists(metadata_file_path):
+		info("Deleting metadata for shapefile: " + metadata_file_path)
+		os.remove(metadata_file_path)
+	
 	# Zip up the files
 	debug(' - Zipping the shapefile')
 	zip_file = zipfile.ZipFile(os.path.join(temp_working_folder,name + ".zip"), "w")
@@ -487,15 +499,22 @@ def export_metadata():
 	
 	# Set the destinion of the metadata export
 	source = source_feature_class
-	destination = os.path.join(temp_working_folder,name + ".xml")
+	raw_metadata_export = os.path.join(temp_working_folder,name + "_raw.xml")
 	
 	# Export the metadata
 	arcpy.env.workspace = temp_working_folder
 	installDir = arcpy.GetInstallInfo("desktop")["InstallDir"]
-	translator = installDir + "Metadata/Translator/ESRI_ISO2ISO19139.xml"
-	
-	arcpy.ExportMetadata_conversion(source, translator, destination)
-	
+	translator = installDir + "Metadata/Translator/ARCGIS2FGDC.xml"
+	arcpy.ExportMetadata_conversion(source, translator, raw_metadata_export)
+
+	# Process: XSLT Transformation to remove any sensitive info or format
+	destination = os.path.join(temp_working_folder,name + ".xml")	
+	if os.path.exists(args.metadata_xslt):
+		arcpy.XSLTransform_conversion(raw_metadata_export, args.metadata_xslt, destination, "")
+	else:
+		# If no transformation exists, just rename and publish the raw metadata
+		os.rename(raw_metadata_export, destination)
+		
 	# Publish the metadata to the download folder
 	publish_file(temp_working_folder, name + ".xml","metadata")
 
@@ -836,17 +855,13 @@ def update_local_dataset_from_metadata(dataset_entity):
 	# Open the file and read in the xml
 	metadata_file = open(file_path,"r")
 	metadata_xml = et.parse(metadata_file)
-
-	# Specify the namespaces
-	ns_gmd = "{http://www.isotc211.org/2005/gmd}"
-	ns_gco = "{http://www.isotc211.org/2005/gco}"
 	
 	# Update the dataset title
 	title = get_dataset_title()
 	dataset_entity['title'] = title	
 
 	# Get the abstract
-	xpath_abstract = '{0}identificationInfo/{0}MD_DataIdentification/{0}abstract/{1}CharacterString'.format(ns_gmd,ns_gco)
+	xpath_abstract = '//abstract'
 	abstract_element = metadata_xml.find(xpath_abstract)
 	if (abstract_element is not None):
 		dataset_entity['notes'] = abstract_element.text
@@ -854,7 +869,7 @@ def update_local_dataset_from_metadata(dataset_entity):
 		debug('No abstract found in metadata');
 
 	# Get the maintainer
-	xpath_maintainer= '//{0}distributionInfo/{0}MD_Distribution/{0}distributor/{0}MD_Distributor/{0}distributorContact/{0}CI_ResponsibleParty/{0}organisationName/{1}CharacterString'.format(ns_gmd,ns_gco);
+	xpath_maintainer= '//distinfo/distrib/cntinfo/cntorgp/cntorg'
 	maintainer_element = metadata_xml.find(xpath_maintainer)
 	if (maintainer_element != None):
 		dataset_entity['maintainer'] = maintainer_element.text
@@ -862,7 +877,7 @@ def update_local_dataset_from_metadata(dataset_entity):
 		debug('No maintainer found in metadata');
 
 	# Get the maintainer email
-	xpath_maintainer_email = '//{0}distributionInfo/{0}MD_Distribution/{0}distributor/{0}MD_Distributor/{0}distributorContact/{0}CI_ResponsibleParty/{0}contactInfo/{0}CI_Contact/{0}address/{0}CI_Address/{0}electronicMailAddress/{1}CharacterString'.format(ns_gmd,ns_gco);
+	xpath_maintainer_email = '//distinfo/distrib/cntinfo/cntemail'
 	maintainer_email_element = metadata_xml.find(xpath_maintainer_email)
 	if (maintainer_email_element != None):
 		dataset_entity['maintainer_email'] = maintainer_email_element.text
@@ -870,7 +885,7 @@ def update_local_dataset_from_metadata(dataset_entity):
 		debug('No maintainer email found in metadata');
 
 	# Get the author
-	xpath_author = '//{0}identificationInfo/{0}MD_DataIdentification/{0}pointOfContact/{0}CI_ResponsibleParty/{0}individualName/{1}CharacterString'.format(ns_gmd,ns_gco);
+	xpath_author = '//idinfo/citation/citeinfo/origin'
 	author_element = metadata_xml.find(xpath_author)
 	if (author_element != None):
 		dataset_entity['author'] = author_element.text
@@ -878,12 +893,7 @@ def update_local_dataset_from_metadata(dataset_entity):
 		debug('No author found in metadata');
 
 	# Get the author_email
-	xpath_author_email = '//{0}identificationInfo/{0}MD_DataIdentification/{0}pointOfContact/{0}CI_ResponsibleParty/{0}contactInfo/{0}CI_Contact/{0}address/{0}CI_Address/{0}electronicMailAddress/{1}CharacterString'.format(ns_gmd,ns_gco);
-	author_email_element = metadata_xml.find(xpath_author_email)
-	if (author_email_element != None):
-		dataset_entity['author_email'] = author_email_element.text
-	else:
-		debug('No author found in metadata');
+	dataset_entity['author_email'] = ''
 
 	# Get the keywords
 	keywords = []
@@ -895,9 +905,17 @@ def update_local_dataset_from_metadata(dataset_entity):
 			keywords.append('featured')
 			debug ('Preserving featured dataset tag');
 
-	# Get the keywords from the ArcGIS Metadata
-	xpath_keywords = '//{0}MD_Keywords/{0}keyword/{1}CharacterString'.format(ns_gmd,ns_gco);
-	keyword_elements = metadata_xml.findall(xpath_keywords)
+	# Get the theme keywords from the ArcGIS Metadata
+	xpath_theme_keys = '//themekey'
+	theme_keyword_elements = metadata_xml.findall(xpath_theme_keys)
+	
+	# Get the place keywords from the ArcGIS Metadata
+	xpath_place_keys = '//placekey'
+	place_keyword_elements = metadata_xml.findall(xpath_place_keys)	
+	
+	# Combine the lists
+	keyword_elements = theme_keyword_elements + place_keyword_elements
+	
 	for keyword_element in keyword_elements:
 		keyword = keyword_element.text
 		keyword = keyword.lower().replace(' ','-')
