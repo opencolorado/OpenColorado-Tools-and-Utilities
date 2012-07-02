@@ -510,9 +510,11 @@ def export_metadata():
 	# Process: XSLT Transformation to remove any sensitive info or format
 	destination = os.path.join(temp_working_folder,name + ".xml")	
 	if os.path.exists(args.metadata_xslt):
+		info(" Applying metadata XSLT: " + args.metadata_xslt)
 		arcpy.XSLTransform_conversion(raw_metadata_export, args.metadata_xslt, destination, "")
 	else:
 		# If no transformation exists, just rename and publish the raw metadata
+		info(" Metadata XSLT not found")
 		os.rename(raw_metadata_export, destination)
 		
 	# Publish the metadata to the download folder
