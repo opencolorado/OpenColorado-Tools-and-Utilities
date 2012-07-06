@@ -14,7 +14,8 @@
 #    a. Shapefile (zipped)
 #    b. CAD (dwg file)
 #    c. KML (zipped KMZ)
-#	 d. Metadata (xml)
+#    d. CSV (csv file)
+#	 e. Metadata (xml)
 #
 # 	 The script automatically manages the creation of output folders if they
 #    do not already exist.  Also creates temp folders for processing as
@@ -31,6 +32,8 @@
 #				    |- <dataset_name>.dwg
 #		        |- kml 
 #				    |- <dataset_name>.kmz
+#				|- csv 
+#				    |- <dataset_name>.csv
 #		        |- metadata 
 #				    |- <dataset_name>.xml
 #
@@ -46,16 +49,17 @@
 # ---------------------------------------------------------------------------
 
 # Import system modules
-import sys, os, arcpy, shutil, zipfile, glob, ckanclient, datetime, argparse
+import sys, os, arcpy, shutil, zipfile, glob, ckanclient, datetime, argparse, csv
 import xml.etree.ElementTree as et
 
 # Global variables
 args = None
 output_folder = None
 source_feature_class = None
+staging_feature_class = None
 ckan_client = None
 temp_workspace = None
-available_formats = ['shp','dwg','kml','metadata']
+available_formats = ['shp','dwg','kml','csv','metadata']
 
 def main():
 	"""Main function
@@ -63,7 +67,7 @@ def main():
 	Returns:
         None
 	"""
-	global args, output_folder, source_feature_class, temp_workspace
+	global args, output_folder, source_feature_class, staging_feature_class, temp_workspace
 	
 	parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
 			
@@ -92,7 +96,7 @@ def main():
 	parser.add_argument('-f', '--formats',
 		action='store',
 		dest='formats', 
-		default='shp,dwg,kml,metadata',
+		default='shp,dwg,kml,csv,metadata',
 		help='Specific formats to publish (shp=Shapefile, dwg=CAD drawing file, kml=Keyhole Markup Language, metadata=Metadata).  If not specified all formats will be published.')
 		
 	parser.add_argument('-a', '--ckan-api',
@@ -209,28 +213,35 @@ def main():
 		temp_workspace = create_dataset_temp_folder()
 	
 		# Export to the various file formats
+		if (len(args.formats) > 0):
+			staging_feature_class = export_file_geodatabase()
+
 		if 'shp' in args.formats:
 			info('Exporting to shapefile')
 			export_shapefile()
-		
+
 		if 'dwg' in args.formats:
 			info('Exporting to CAD drawing file')
 			export_cad()
-	
+
 		if 'kml' in args.formats:
 			info('Exporting to kml file')
 			export_kml()
+		
+		if 'csv' in args.formats:
+			info('Exporting to csv file')
+			export_csv()
 			
 		if 'metadata' in args.formats:
 			info('Exporting metadata XML file')
 			export_metadata()
-		
+
 		# Update the dataset information on the CKAN repository
 		publish_to_ckan()
-		
+
 		# Delete the dataset temp folder
 		delete_dataset_temp_folder()
-		
+
 		info('Completed ' + sys.argv[0])
 		
 	except:
@@ -240,8 +251,7 @@ def main():
 			info("Exiting program.")
 			
 		sys.exit(1)
-		
-		
+
 def publish_to_ckan():
 	"""Updates the dataset in the CKAN repository or creates a new dataset
 
@@ -327,11 +337,19 @@ def delete_dataset_temp_folder():
         None
 	"""
 	global temp_workspace
+
+	# Delete the file geodatabase separately before deleting the
+	# directory to release the locks	
+	name = get_dataset_filename()
+	gdb_folder = os.path.join(temp_workspace,'gdb')	
+	gdb_file = os.path.join(gdb_folder, name + ".gdb")	
 	
-	directory = os.path.join(temp_workspace)
-	if os.path.exists(directory):
-		debug('Deleting directory "' + directory)
-		shutil.rmtree(directory)
+	info('Deleting file geodatabase:' + gdb_file)
+	arcpy.Delete_management(gdb_file)	
+
+	if os.path.exists(temp_workspace):
+		info('Deleting directory "' + temp_workspace)
+		shutil.rmtree(temp_workspace)
 
 def publish_file(directory, file_name, file_type):
 	"""Publishes a file to the catalog download folder
@@ -364,6 +382,32 @@ def get_dataset_title():
 
 	# Create the dataset title
 	return args.ckan_dataset_title_prefix + ": " + args.dataset_title
+
+def export_file_geodatabase():
+	"""Exports the feature class to a file geodatabase
+	
+	Returns:
+        None
+	"""
+	folder = 'gdb'
+	name = get_dataset_filename()
+	
+	# Create a gdb folder in the temp directory if it does not exist
+	temp_working_folder = os.path.join(temp_workspace,folder)
+	create_folder(temp_working_folder, True)
+	
+	# Export the feature class to a temporary file gdb
+	gdb_temp = os.path.join(temp_working_folder, name + ".gdb")
+	gdb_feature_class = os.path.join(gdb_temp, name)
+
+	debug(' - Creating temporary file geodatabase for processing:' + gdb_temp)
+	if not arcpy.Exists(gdb_temp):
+		arcpy.CreateFileGDB_management(os.path.dirname(gdb_temp), os.path.basename(gdb_temp)) 
+
+	debug(' - Copying feature class to:' + gdb_feature_class)
+	arcpy.CopyFeatures_management(source_feature_class, gdb_feature_class)
+	
+	return gdb_feature_class
 	
 def export_shapefile():
 	"""Exports the feature class as a zipped shapefile
@@ -383,7 +427,7 @@ def export_shapefile():
 	create_folder(zip_folder)
 
 	# Export the shapefile to the folder
-	source = source_feature_class
+	source = staging_feature_class
 	destination = os.path.join(zip_folder,name + ".shp")
 	
 	# Export the shapefile
@@ -422,7 +466,7 @@ def export_cad():
 	create_folder(temp_working_folder, True)
 	
 	# Export the shapefile to the folder
-	source = source_feature_class
+	source = staging_feature_class
 	destination = os.path.join(temp_working_folder,name + ".dwg")
 	
 	# Export the drawing file
@@ -446,24 +490,11 @@ def export_kml():
 	# Create a kml folder in the temp directory if it does not exist
 	temp_working_folder = os.path.join(temp_workspace,folder)
 	create_folder(temp_working_folder, True)
+	destination = os.path.join(temp_working_folder,name + ".kmz")		
 	
-	# Export the feature class to a temporary file gdb
-	source = source_feature_class
-	destination = os.path.join(temp_working_folder,name + ".kmz")
-	
-	gdb_temp = os.path.join(temp_working_folder,name + ".gdb")
-	gdb_feature_class = os.path.join(gdb_temp,name)
-	
-	debug(' - Creating temporary file geodatabase for processing:' + gdb_temp)
-	if not arcpy.Exists(gdb_temp):
-		arcpy.CreateFileGDB_management(os.path.dirname(gdb_temp),os.path.basename(gdb_temp)) 
-		
-	debug(' - Copying feature class to:' + gdb_feature_class)
-	arcpy.CopyFeatures_management(source, gdb_feature_class)
-
 	# Make a feature layer (in memory)
-	debug(' - Generating KML file in memory from  "' + gdb_feature_class + '"')
-	arcpy.MakeFeatureLayer_management(gdb_feature_class, name, "", "")
+	debug(' - Generating KML file in memory from  "' + staging_feature_class + '"')
+	arcpy.MakeFeatureLayer_management(staging_feature_class, name, "", "")
 	
 	# Encode special characters that don't convert to KML correctly.
 	# Replace any literal nulls <Null> with empty as these don't convert to KML correctly
@@ -476,10 +507,7 @@ def export_kml():
 	# Delete the in-memory feature layer and the file geodatabase
 	debug(' - Deleting in-memory feature layer:' + name)
 	arcpy.Delete_management(name)
-	
-	debug(' - Deleting temporary file geodatabase:' + gdb_temp)
-	arcpy.Delete_management(gdb_temp)
-	
+
 	# Publish the zipfile to the download folder
 	publish_file(temp_working_folder, name + ".kmz","kml")
 	
@@ -498,7 +526,7 @@ def export_metadata():
 	create_folder(temp_working_folder, True)
 	
 	# Set the destinion of the metadata export
-	source = source_feature_class
+	source = staging_feature_class
 	raw_metadata_export = os.path.join(temp_working_folder,name + "_raw.xml")
 	
 	# Export the metadata
@@ -519,6 +547,44 @@ def export_metadata():
 		
 	# Publish the metadata to the download folder
 	publish_file(temp_working_folder, name + ".xml","metadata")
+
+def export_csv():
+	"""Exports the feature class as a csv file
+	
+	Returns:
+        None
+	"""
+	folder = 'csv'
+	name = get_dataset_filename()
+	
+	# Create a folder in the temp directory if it does not exist
+	temp_working_folder = os.path.join(temp_workspace,folder)
+	create_folder(temp_working_folder, True)
+	
+	# Export the csv to the folder
+	source = staging_feature_class
+	destination = os.path.join(temp_working_folder,name + ".csv")
+
+	# Export the csv
+	debug(' - Exporting to csv from "' + source + '" to "' + destination + '"')
+
+	rows = arcpy.SearchCursor(source)
+	csvFile = csv.writer(open(destination, 'wb')) #output csv
+	fieldnames = [f.name for f in arcpy.ListFields(source)]
+	allRows = []
+	for row in rows:
+		rowlist = []
+		for field in fieldnames:
+			rowlist.append(row.getValue(field))
+			
+		allRows.append(rowlist)
+
+	csvFile.writerow(fieldnames)
+	for row in allRows:
+		csvFile.writerow(row)
+		
+	# Publish the csv to the download folder
+	publish_file(temp_working_folder, name + ".csv","csv")
 
 def replace_literal_nulls(layer_name):
 	"""Replaces literal string representation of null, '<Null>', with a true null value 
@@ -566,7 +632,6 @@ def replace_literal_nulls(layer_name):
 			del row
 		if rows:
 			del rows
-		
 		
 def get_remote_dataset(dataset_id):
 	"""Gets the dataset from CKAN repository
@@ -779,6 +844,23 @@ def update_dataset_resources(dataset_entity):
 		kml_resource['url'] = args.download_url + dataset_file_name + '/kml/' + dataset_file_name + '.kmz'
 		kml_resource['mimetype'] = 'application/vnd.google-earth.kmz'
 		kml_resource['format'] = 'KML'
+
+	if 'csv' in args.formats:
+		
+		csv_resource = get_resource_by_format(resources, 'csv')
+		
+		if (csv_resource is None):
+			info('Creating new CSV resource')		
+			csv_resource = {}
+			resources.append(csv_resource)
+		else:			
+			info('Updating CSV resource')
+
+		csv_resource['name'] = args.dataset_title + ' - CSV'
+		csv_resource['description'] = title + ' - CSV'
+		csv_resource['url'] = args.download_url + dataset_file_name + '/csv/' + dataset_file_name + '.csv'
+		csv_resource['mimetype'] = 'text/csv'
+		csv_resource['format'] = 'CSV'
 
 	if 'metadata' in args.formats:
 		
