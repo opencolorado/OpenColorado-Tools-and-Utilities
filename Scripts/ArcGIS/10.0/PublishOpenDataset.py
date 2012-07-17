@@ -93,6 +93,11 @@ def main():
 		required=True,
 		help='The source workspace to publish the feature class from (ex. Database Connections\\\\SDE Connection.sde).  Backslashes must be escaped as in the example.')	
 	
+	parser.add_argument('-e', '--exclude-fields',
+		action='store',
+		dest='exclude_fields', 
+		help='Specifies a comma-delimited list of fields (columns) to remove from the dataset before publishing. (ex. TEMP_FIELD1,TEMP_FIELD2)')
+	
 	parser.add_argument('-f', '--formats',
 		action='store',
 		dest='formats', 
@@ -153,6 +158,13 @@ def main():
 		dest='metadata_xslt',
 		default='..\StyleSheets\Format_FGDC.xslt',
 		help='The XSLT stylesheet to pass the FGDC CSDGM metadata through before publishing.')
+	
+	parser.add_argument('-r', '--exe-result',
+		action="store",
+		dest='exe_result',
+		choices=['export', 'publish', 'all'],
+		default='all',
+		help='Result of executing this script; export, publish to CKAN, or both.')
 		
 	parser.add_argument('-v', '--verbose',
 		action='store_true', 
@@ -203,44 +215,62 @@ def main():
 	debug(' Feature class: ' + source_feature_class)
 	debug(' Dataset name: ' + args.dataset_name)
 	debug(' Publish folder: ' + output_folder)
+	debug(' Run type: {0}'.format(args.exe_result))
 	
 	try:
-						
+		
+		# Delete the dataset temp folder if it exists
+		# TODO: Move to end of script.		
+		delete_dataset_temp_folder()
+
 		# Create the dataset folder and update the output folder
 		output_folder = create_dataset_folder()
 		
 		# Create temporary folder for processing and update the temp workspace folder
 		temp_workspace = create_dataset_temp_folder()
-	
-		# Export to the various file formats
-		if (len(args.formats) > 0):
-			staging_feature_class = export_file_geodatabase()
-
-		if 'shp' in args.formats:
-			info('Exporting to shapefile')
-			export_shapefile()
-
-		if 'dwg' in args.formats:
-			info('Exporting to CAD drawing file')
-			export_cad()
-
-		if 'kml' in args.formats:
-			info('Exporting to kml file')
-			export_kml()
 		
-		if 'csv' in args.formats:
-			info('Exporting to csv file')
-			export_csv()
+		# Export and copy formats to the output folder 
+		if args.exe_result != 'publish':
 			
-		if 'metadata' in args.formats:
-			info('Exporting metadata XML file')
-			export_metadata()
+			# Export to the various file formats
+			if (len(args.formats) > 0):
+				staging_feature_class = export_file_geodatabase()
+				drop_exclude_fields()
+				export_metadata()
+				
+			if 'shp' in args.formats:
+				info('Exporting to shapefile')
+				export_shapefile()
+	
+			if 'dwg' in args.formats:
+				info('Exporting to CAD drawing file')
+				export_cad()
+	
+			if 'kml' in args.formats:
+				info('Exporting to kml file')
+				export_kml()
+			
+			if 'csv' in args.formats:
+				info('Exporting to csv file')
+				export_csv()
+				
+			if 'metadata' in args.formats:
+				info('Exporting metadata XML file')
+				publish_metadata()
 
 		# Update the dataset information on the CKAN repository
-		publish_to_ckan()
+		# if the exe_result is equal to 'publish' or 'both'.
+		if args.exe_result != 'export':
+			remove_missing_formats_from_publication(output_folder)
+			
+			# Publish the dataset to CKAN if there is at least one format. 
+			if len(args.formats) > 0:
+				publish_to_ckan()
 
 		# Delete the dataset temp folder
-		delete_dataset_temp_folder()
+		# TODO: This delete statement was failing at the end of the script, but
+		# works at the beginning. It should really go at the end here:
+		# delete_dataset_temp_folder()
 
 		info('Completed ' + sys.argv[0])
 		
@@ -284,6 +314,33 @@ def publish_to_ckan():
 	if args.increment != "none":
 		info('Updating dataset version')
 		update_dataset_version()
+		
+def remove_missing_formats_from_publication(directory):
+	"""Removes data formats that haven't been created
+	from publishing to CKAN.
+		
+	"""
+	formats = []
+
+	for exp_format in args.formats:
+		
+		info(' - Checking for export format {0}'.format(exp_format))
+		
+		exp_dir = None
+		
+		# Set the export/output directory for the current format
+		if exp_format == 'shp':
+			exp_dir = 'shape'
+		elif exp_format == 'dwg':
+			exp_dir = 'cad'
+		else:
+			exp_dir = exp_format
+
+		exp_dir = os.path.join(directory, exp_dir)
+		if os.path.exists(exp_dir):
+			formats.append(exp_format)
+
+	args.formats = formats
 	
 def create_folder(directory, delete=False):
 	"""Creates a folder if it does not exist
@@ -342,14 +399,16 @@ def delete_dataset_temp_folder():
 	# directory to release the locks	
 	name = get_dataset_filename()
 	gdb_folder = os.path.join(temp_workspace,'gdb')	
-	gdb_file = os.path.join(gdb_folder, name + ".gdb")	
+	gdb_file = os.path.join(gdb_folder, name + '.gdb')
 	
 	info('Deleting file geodatabase:' + gdb_file)
-	arcpy.Delete_management(gdb_file)	
+	if os.path.exists(gdb_file):
+		arcpy.Delete_management(gdb_file)
 
-	if os.path.exists(temp_workspace):
-		info('Deleting directory "' + temp_workspace)
-		shutil.rmtree(temp_workspace)
+	dataset_directory = os.path.join(temp_workspace, name)
+	if os.path.exists(dataset_directory):        		
+		info('Deleting directory "' + dataset_directory)
+		shutil.rmtree(dataset_directory)
 
 def publish_file(directory, file_name, file_type):
 	"""Publishes a file to the catalog download folder
@@ -434,12 +493,6 @@ def export_shapefile():
 	debug(' - Exporting to shapefile from "' + source + '" to "' + destination + '"')
 	arcpy.CopyFeatures_management(source, destination, "", "0", "0", "0")
 	
-	# Delete the metadata file generate from the shapefile export
-	metadata_file_path = destination + ".xml"
-	if os.path.exists(metadata_file_path):
-		info("Deleting metadata for shapefile: " + metadata_file_path)
-		os.remove(metadata_file_path)
-	
 	# Zip up the files
 	debug(' - Zipping the shapefile')
 	zip_file = zipfile.ZipFile(os.path.join(temp_working_folder,name + ".zip"), "w")
@@ -521,7 +574,7 @@ def export_metadata():
 	folder = 'metadata'
 	name = get_dataset_filename()
 	
-	# Create a kml folder in the temp directory if it does not exist
+	# Create a metadata folder in the temp directory if it does not exist
 	temp_working_folder = os.path.join(temp_workspace,folder)
 	create_folder(temp_working_folder, True)
 	
@@ -540,13 +593,33 @@ def export_metadata():
 	if os.path.exists(args.metadata_xslt):
 		info(" Applying metadata XSLT: " + args.metadata_xslt)
 		arcpy.XSLTransform_conversion(raw_metadata_export, args.metadata_xslt, destination, "")
+		
+		# Reimport the clean metadata into the FGDB
+		info(" Reimporting metadata to file geodatabase " + destination)
+		arcpy.MetadataImporter_conversion(destination,staging_feature_class)		
 	else:
 		# If no transformation exists, just rename and publish the raw metadata
 		info(" Metadata XSLT not found")
 		os.rename(raw_metadata_export, destination)
-		
+				
 	# Publish the metadata to the download folder
 	publish_file(temp_working_folder, name + ".xml","metadata")
+	
+def publish_metadata():
+	"""Publishes the already exported metadata to the Open Data Catalog
+	
+	Returns:
+        None
+	"""	
+	
+	folder = 'metadata'
+	name = get_dataset_filename()
+	
+	# Create a kml folder in the temp directory if it does not exist
+	temp_working_folder = os.path.join(temp_workspace,folder)
+		
+	# Publish the metadata to the download folder
+	publish_file(temp_working_folder, name + ".xml","metadata")		
 
 def export_csv():
 	"""Exports the feature class as a csv file
@@ -569,22 +642,58 @@ def export_csv():
 	debug(' - Exporting to csv from "' + source + '" to "' + destination + '"')
 
 	rows = arcpy.SearchCursor(source)
-	csvFile = csv.writer(open(destination, 'wb')) #output csv
-	fieldnames = [f.name for f in arcpy.ListFields(source)]
-	allRows = []
-	for row in rows:
-		rowlist = []
-		for field in fieldnames:
-			rowlist.append(row.getValue(field))
-			
-		allRows.append(rowlist)
-
-	csvFile.writerow(fieldnames)
-	for row in allRows:
-		csvFile.writerow(row)
+	
+	# Open the destination CSV file
+	csv_file = open(destination, 'wb')
+	csv_writer = csv.writer(csv_file)
 		
+	# Get the field names
+	fieldnames = [f.name for f in arcpy.ListFields(source)]
+	
+	# Exclude the OBJECTID field
+	if "OBJECTID" in fieldnames:
+		fieldnames.remove("OBJECTID")
+			
+	# Exclude the shape field for now (TODO: publish as geojson in the future)
+	if "SHAPE" in fieldnames:
+		fieldnames.remove("SHAPE")
+	
+	# Write the header row
+	csv_writer.writerow(fieldnames)
+	
+	# Write the values
+	for row in rows:
+		values = []
+		for field in fieldnames:
+				values.append(row.getValue(field))
+				
+		csv_writer.writerow(values)	
+	
+	# Close the CSV file
+	csv_file.close()
+	
 	# Publish the csv to the download folder
 	publish_file(temp_working_folder, name + ".csv","csv")
+
+def	drop_exclude_fields():
+	"""Removes all fields (columns) from a dataset passed into the exclude-fields
+	parameter.
+	
+	Parameters:
+		None
+		
+	Returns:
+		None
+	"""
+
+	# Get the list of fields to exclude (passed as an argument)
+	exclude_fields = args.exclude_fields
+	if exclude_fields != None:
+		info("Deleting fields: " + exclude_fields)
+
+		# If commas are used instead of semi-colons, swap them
+		exclude_fields = exclude_fields.replace(',',';')
+		arcpy.DeleteField_management(staging_feature_class, exclude_fields)	
 
 def replace_literal_nulls(layer_name):
 	"""Replaces literal string representation of null, '<Null>', with a true null value 
@@ -613,17 +722,20 @@ def replace_literal_nulls(layer_name):
 			
 			for field in fields:
 				if field.type == 'String':
-					value = str(row.getValue(field.name))
+					value = row.getValue(field.name)
 					
-					if (value.find('<Null>') > -1): 
-
-						debug(' - Found a "<Null>" string to nullify in field: {0}.'.format(field.name))
-						debug(' - Replacing null string')
-						row.setValue(field.name, None)
-						debug(' - Replaced with {0}'.format(value))
-						
-						# Update row
-						rows.updateRow(row)
+					# Ignore null/empty fields
+					if (value != None):
+						# Check for '<Null>' string					
+						if (value.find('<Null>') > -1): 
+	
+							debug(' - Found a "<Null>" string to nullify in field: {0}.'.format(field.name))
+							debug(' - Replacing null string')
+							row.setValue(field.name, None)
+							debug(' - Replaced with {0}'.format(value))
+							
+							# Update row
+							rows.updateRow(row)
 		
 		debug('Done replacing literal nulls in {0}.'.format(layer_name))
 			
@@ -677,8 +789,11 @@ def create_dataset(dataset_id):
 	if (args.update_from_metadata != None and 'metadata' in args.formats):
 		dataset_entity = update_local_dataset_from_metadata(dataset_entity)
 	
-	# Create a new dataset in CKAN
-	create_remote_dataset(dataset_entity)
+	if args.exe_result != 'export':
+		# Create a new dataset in CKAN
+		create_remote_dataset(dataset_entity)
+	else:
+		info(" Publication run type set to {0}, skipping remote creation of dataset.".format(args.exe_result))
 		
 def create_local_dataset(dataset_id):
 	"""Creates a new dataset entity, but does not commit it to CKAN
@@ -762,7 +877,7 @@ def update_dataset(dataset_entity):
 
 def update_dataset_resources(dataset_entity):
 	"""Updates the CKAN dataset entity resources. If the resources already
-	   exist in the CKAN repository, they updated (preserving the original 
+	   exist in the CKAN repository, they're updated (preserving the original 
 	   unique resource ID). If the resource does not already exist,
 	   a new one is created. 
 	   
@@ -790,8 +905,8 @@ def update_dataset_resources(dataset_entity):
 	# Construct the file resource download urls
 	dataset_file_name = get_dataset_filename() 
 	
-	# Get the dataset title
-	title = get_dataset_title()	
+	# Get the dataset title (short name)
+	title = args.dataset_title
 	
 	# Export to the various file formats
 	if 'shp' in args.formats:
@@ -805,8 +920,8 @@ def update_dataset_resources(dataset_entity):
 		else:			
 			info('Updating SHP resource')
 		
-		shp_resource['name'] = args.dataset_title + ' - SHP'
-		shp_resource['description'] = title + ' - SHP'
+		shp_resource['name'] = title + ' - SHP'
+		shp_resource['description'] = title
 		shp_resource['url'] = args.download_url + dataset_file_name + '/shape/' + dataset_file_name + '.zip'
 		shp_resource['mimetype'] = 'application/zip'
 		shp_resource['format'] = 'SHP'
@@ -822,8 +937,8 @@ def update_dataset_resources(dataset_entity):
 		else:			
 			info('Updating DWG resource')
 		
-		dwg_resource['name'] = args.dataset_title + ' - DWG'
-		dwg_resource['description'] = title + ' - DWG'
+		dwg_resource['name'] = title + ' - DWG'
+		dwg_resource['description'] = title
 		dwg_resource['url'] = args.download_url + dataset_file_name + '/cad/' + dataset_file_name + '.dwg'
 		dwg_resource['mimetype'] = 'application/acad'
 		dwg_resource['format'] = 'DWG'	
@@ -839,8 +954,8 @@ def update_dataset_resources(dataset_entity):
 		else:			
 			info('Updating KML resource')
 
-		kml_resource['name'] = args.dataset_title + ' - KML'
-		kml_resource['description'] = title + ' - KML'
+		kml_resource['name'] = title + ' - KML'
+		kml_resource['description'] = title
 		kml_resource['url'] = args.download_url + dataset_file_name + '/kml/' + dataset_file_name + '.kmz'
 		kml_resource['mimetype'] = 'application/vnd.google-earth.kmz'
 		kml_resource['format'] = 'KML'
@@ -856,8 +971,8 @@ def update_dataset_resources(dataset_entity):
 		else:			
 			info('Updating CSV resource')
 
-		csv_resource['name'] = args.dataset_title + ' - CSV'
-		csv_resource['description'] = title + ' - CSV'
+		csv_resource['name'] = title + ' - CSV'
+		csv_resource['description'] = title
 		csv_resource['url'] = args.download_url + dataset_file_name + '/csv/' + dataset_file_name + '.csv'
 		csv_resource['mimetype'] = 'text/csv'
 		csv_resource['format'] = 'CSV'
@@ -873,8 +988,8 @@ def update_dataset_resources(dataset_entity):
 		else:			
 			info('Updating Metadata resource')
 
-		metadata_resource['name'] = args.dataset_title + ' - Metadata'
-		metadata_resource['description'] = title + ' - Metadata'
+		metadata_resource['name'] = title + ' - Metadata'
+		metadata_resource['description'] = 'Metadata'
 		metadata_resource['url'] = args.download_url + dataset_file_name + '/metadata/' + dataset_file_name + '.xml'
 		metadata_resource['mimetype'] = 'application/xml'
 		metadata_resource['format'] = 'XML'
@@ -913,7 +1028,7 @@ def get_resource_by_format(resources, format_type):
 def update_local_dataset_from_metadata(dataset_entity):
 	"""Updates the CKAN dataset entity by reading in metadata
 	   from the ArcGIS Metadata xml file. If the dataset already
-	   exists in the CKAN repository, the dataset is fecthed
+	   exists in the CKAN repository, the dataset is fetched
 	   and modified. If the dataset does not already exist,
 	   a new dataset entity object is created. 
 	   
@@ -933,12 +1048,13 @@ def update_local_dataset_from_metadata(dataset_entity):
 	# Reconstruct the name of the file
 	folder = 'metadata'
 	name = get_dataset_filename()
-	temp_working_folder = os.path.join(temp_workspace,folder)
-	file_path = os.path.join(temp_working_folder,name + ".xml")
+	working_folder = os.path.join(output_folder, folder)
+	file_path = os.path.join(working_folder,name + ".xml")
 	
 	# Open the file and read in the xml
 	metadata_file = open(file_path,"r")
 	metadata_xml = et.parse(metadata_file)
+	metadata_file.close()
 	
 	# Update the dataset title
 	title = get_dataset_title()
