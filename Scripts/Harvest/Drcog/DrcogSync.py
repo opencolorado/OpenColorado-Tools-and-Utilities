@@ -31,11 +31,12 @@ def main():
     # Get a list of subjects from the DRCOG catalog
     subjects = get_subjects()
     
-    # Get all datasets by subject (datasets may be in more than one subject so there could be duplicates here)
     datasets = []
+    
+    # Get all datasets by subject (datasets may be in more than one subject so there could be duplicates here)
     for subject in subjects:
         datasets = datasets + get_dataset_urls_by_subject(subject)
-        break # Just do the first subject for now
+        #break # Just do the first subject for now
     
     # Remove duplicates
     datasets = list(set(datasets))
@@ -119,7 +120,7 @@ def get_dataset_entity(dataset):
     dataset_entity['name'] = ckan_name_prefix + dataset
     dataset_entity['title'] = ckan_title_prefix + soup.find("h1",{ "id" : "page-title" }).getText()
     dataset_entity['license_id'] = ckan_license
-    dataset_entity['url'] = base_url + data_catalog_prefix
+    dataset_entity['url'] = dataset_url
     
     resources = []
  
@@ -136,13 +137,22 @@ def get_dataset_entity(dataset):
     dataset_entity['tags'] = tags
     
     print(tags)
-    
+            
+        
     # Get descriptive information
     for field_item in soup.findAll("div", { "class" : "field-item" }):
         
-        field_item_label = field_item.div.getText().strip().lower()
+        # Get the field label (if it exists)
+        field_item_label = ""
+        field_item_div = field_item.div
+        if (field_item_div != None):
+            field_item_label = field_item_div.getText().strip().lower()
+            if (len(field_item_label) > 0 and not field_item_label.endswith(".pdf")):
+                print(field_item_label + " - extracting")
+                field_item.div.extract() # Remove the label tag so we can get the remaining text by itself
+        
         field_item_link = field_item.a
-        field_item.div.extract()
+        
         field_item_text = field_item.getText().strip()
         
         #print field_item_label
@@ -185,9 +195,29 @@ def get_dataset_entity(dataset):
             elif (field_item_label.startswith("shapefile")):
                 resource["name"] = dataset_entity['title'] + " - SHP"
                 resource["mimetype"] = "application/zip"
+            
+            if ("mimetype" in resource):
+                resources.append(resource)
+            
+    # Search for other filefields (PDF) 
+    filefield_file = soup.find("div", { "class" : "filefield-file" })
+    if (filefield_file != None):
+        filefield_file_label = filefield_file.a.getText().strip()
+        filefield_file_link = filefield_file.a.get('href')
+        filefield_file_mimetype = filefield_file.a.get('type')
+        
+        print(filefield_file_link) 
+        if (filefield_file_mimetype.startswith("application/pdf")) :            
+            resource = {}
+            if (filefield_file_link.startswith("http")):
+                resource["url"] = filefield_file_link
+            else:
+                resource["url"] = base_url + filefield_file_link
                 
-            resources.append(resource)
-    
+            resource["name"] = filefield_file_label
+            resource["mimetype"] = "application/pdf" #Hack, need to get this from URL?    
+            resources.append(resource) 
+
     # Add the resources to the dataset
     dataset_entity["resources"] = resources
     
@@ -265,24 +295,26 @@ def update_dataset(dataset_entity_remote, dataset_entity):
        dataset_entity_remote['resources'] = []
         
     for resource in dataset_entity['resources']:
-        mimetype = resource['mimetype']
+        
+        mimetype = ""
+        if 'mimetype' in resource:
+            mimetype = resource['mimetype']
         
         # Check if a resource is already present with the same mimetype
         # If so, update it, otherwise add as a new resource
         found = False
         for resource_remote in dataset_entity_remote['resources']:
-            if resource_remote['mimetype'] == resource["mimetype"]:
+            if 'mimetype' in resource_remote and resource_remote['mimetype'] == mimetype:
                 found = True
                 break
         
         if (found) :
-            print("Match found with remote resource, updating:" + resource["mimetype"])
+            print("found")
             resource_remote["url"] = resource["url"]
             resource_remote["name"] = resource["name"]
             resource_remote["mimetype"] = resource["mimetype"]
         else:
-            print("No match found with remote resource, adding:" + resource["mimetype"])
-            print(resource)
+            print("not found")
             dataset_entity_remote['resources'].append(resource)
             
     ckan_client.package_entity_put(dataset_entity_remote)
