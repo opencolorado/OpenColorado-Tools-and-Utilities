@@ -120,15 +120,21 @@ def get_dataset_entity(dataset):
     dataset_entity['license_id'] = ckan_license
     dataset_entity['url'] = base_url + data_catalog_prefix
     
+    resources = []
+ 
     # Get descriptive information
     for field_item in soup.findAll("div", { "class" : "field-item" }):
+        
         field_item_label = field_item.div.getText().strip().lower()
+        field_item_link = field_item.a
         field_item.div.extract()
         field_item_text = field_item.getText().strip()
         
         print field_item_label
+        print field_item_link
         print field_item_text
-        
+    
+        # Get dataset attributes    
         if (field_item_label.startswith("description:")):
             dataset_entity['notes'] = field_item_text
         elif (field_item_label.startswith("source:")):
@@ -137,6 +143,38 @@ def get_dataset_entity(dataset):
             dataset_entity['maintainer'] = field_item_text
         elif (field_item_label.startswith("contact email:")):
             dataset_entity['maintainer_email'] = field_item_text
+    
+        # Get resources
+        if (field_item_link != None):
+            resource_url = field_item_link.get('href')
+            
+            resource = {}
+            
+            # If paths are relative make them absolute
+            if (resource_url.startswith("http")):
+                resource["url"] = resource_url
+            else:
+                resource["url"] = base_url + resource_url
+                
+            resource["name"] = dataset_entity['title']
+            
+            if (field_item_label.startswith("kml")):
+                resource["name"] = dataset_entity['title'] + " - KML"
+                resource["mimetype"] = "application/vnd.google-earth.kmz"
+            elif (field_item_label.startswith("wms")):
+                resource["name"] = dataset_entity['title'] + " - WMS"
+                resource["mimetype"] = "application/wms"
+            elif (field_item_label.startswith("georss")):
+                resource["name"] = dataset_entity['title'] + " - GeoRSS"
+                resource["mimetype"] = "application/rss"
+            elif (field_item_label.startswith("shapefile")):
+                resource["name"] = dataset_entity['title'] + " - SHP"
+                resource["mimetype"] = "application/zip"
+                
+            resources.append(resource)
+    
+    # Add the resources to the dataset
+    dataset_entity["resources"] = resources
     
     return dataset_entity
 
@@ -206,6 +244,32 @@ def update_dataset(dataset_entity_remote, dataset_entity):
     dataset_entity_remote['maintainer'] = dataset_entity["maintainer"]
     dataset_entity_remote['maintainer_email'] = dataset_entity["maintainer_email"]
     
+    
+    # Process resources
+    if not 'resources' in dataset_entity_remote:
+       dataset_entity_remote['resources'] = []
+        
+    for resource in dataset_entity['resources']:
+        mimetype = resource['mimetype']
+        
+        # Check if a resource is already present with the same mimetype
+        # If so, update it, otherwise add as a new resource
+        found = False
+        for resource_remote in dataset_entity_remote['resources']:
+            if resource_remote['mimetype'] == resource["mimetype"]:
+                found = True
+                break
+        
+        if (found) :
+            print("Match found with remote resource, updating")
+            resource_remote["url"] = resource["url"]
+            resource_remote["name"] = resource["name"]
+            resource_remote["mimetype"] = resource["mimetype"]
+        else:
+            print("No match found with remote resource, adding")
+            print(resource)
+            dataset_entity_remote['resources'].append(resource)
+            
     ckan_client.package_entity_put(dataset_entity_remote)
 
 def get_remote_dataset(dataset_id):
