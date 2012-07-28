@@ -19,7 +19,7 @@ subjects_url_prefix = "/datacatalog/subjects/"
 dataset_url_prefix = "/datacatalog/content/"
 ckan_client = None
 
-ckan_host = "http://test.opencolorado.org/api/2"
+ckan_host = "http://data.opencolorado.org/api/2"
 ckan_key = sys.argv[1]
 ckan_group = "drcog"
 ckan_title_prefix = "DRCOG: "
@@ -148,11 +148,9 @@ def get_dataset_entity(dataset):
         if (field_item_div != None):
             field_item_label = field_item_div.getText().strip().lower()
             if (len(field_item_label) > 0 and not field_item_label.endswith(".pdf")):
-                print(field_item_label + " - extracting")
                 field_item.div.extract() # Remove the label tag so we can get the remaining text by itself
         
         field_item_link = field_item.a
-        
         field_item_text = field_item.getText().strip()
         
         #print field_item_label
