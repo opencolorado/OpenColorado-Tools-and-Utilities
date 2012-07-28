@@ -6,6 +6,7 @@
 
 # Imports
 import os
+import sys
 import urllib2
 import ckanclient
 import logging
@@ -19,7 +20,7 @@ dataset_url_prefix = "/datacatalog/content/"
 ckan_client = None
 
 ckan_host = "http://test.opencolorado.org/api/2"
-ckan_key = "5e6c9ea1-37fa-4b68-9412-5dbff28596bc"
+ckan_key = sys.argv[1]
 ckan_group = "drcog"
 ckan_title_prefix = "DRCOG: "
 ckan_name_prefix = "drcog-"
@@ -46,7 +47,7 @@ def main():
         
         publish_to_ckan(dataset_entity)
         
-        break #Just do the first dataset for now
+        #break #Just do the first dataset for now
         
 def get_subjects():
     """Gets a list of subjects from the DRCOG data catalog
@@ -122,6 +123,20 @@ def get_dataset_entity(dataset):
     
     resources = []
  
+    # Get the tags
+    tags = []
+    terms_element = soup.find("div", { "class" : "terms"})
+    if (terms_element != None) :
+        for li in terms_element.findAll("li"):
+            tag = li.getText()
+            tag = tag.lower().replace(' ','-')
+            tag = tag.lower().replace('(','')
+            tag = tag.lower().replace(')','')
+            tags.append(tag)
+    dataset_entity['tags'] = tags
+    
+    print(tags)
+    
     # Get descriptive information
     for field_item in soup.findAll("div", { "class" : "field-item" }):
         
@@ -130,9 +145,9 @@ def get_dataset_entity(dataset):
         field_item.div.extract()
         field_item_text = field_item.getText().strip()
         
-        print field_item_label
-        print field_item_link
-        print field_item_text
+        #print field_item_label
+        #print field_item_link
+        #print field_item_text
     
         # Get dataset attributes    
         if (field_item_label.startswith("description:")):
@@ -243,7 +258,7 @@ def update_dataset(dataset_entity_remote, dataset_entity):
     dataset_entity_remote['author'] = dataset_entity["author"]
     dataset_entity_remote['maintainer'] = dataset_entity["maintainer"]
     dataset_entity_remote['maintainer_email'] = dataset_entity["maintainer_email"]
-    
+    dataset_entity_remote['tags'] = dataset_entity["tags"]
     
     # Process resources
     if not 'resources' in dataset_entity_remote:
@@ -261,12 +276,12 @@ def update_dataset(dataset_entity_remote, dataset_entity):
                 break
         
         if (found) :
-            print("Match found with remote resource, updating")
+            print("Match found with remote resource, updating:" + resource["mimetype"])
             resource_remote["url"] = resource["url"]
             resource_remote["name"] = resource["name"]
             resource_remote["mimetype"] = resource["mimetype"]
         else:
-            print("No match found with remote resource, adding")
+            print("No match found with remote resource, adding:" + resource["mimetype"])
             print(resource)
             dataset_entity_remote['resources'].append(resource)
             
