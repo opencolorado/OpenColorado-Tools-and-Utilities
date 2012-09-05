@@ -3,10 +3,9 @@
 # ---------------------------------------------------------------------------
 # Generate a heat map from shapefiles in a CKAN data catalog
 #----------------------------------------------------------------------------
-import random, os, sys, Image, ImageFilter, urllib2, zipfile, shutil
+import random, os, sys, Image, ImageFilter, urllib2, zipfile, shutil, numpy
 import ckanclient
 from osgeo import gdal, ogr, osr
-#from numpy import *
 
 # Globals
 datasets_folder = "datasets"
@@ -14,21 +13,29 @@ download_folder = "download"
 
 ckan_host = "http://data.opencolorado.org/api/2"
 
+# Bounding box in web mercator coordinates
 x_min = -12140532.1637
 x_max = -11359138.5791
 y_min = 4438050.84302
 y_max = 5012849.66619
-resolution = 75 # Pixel size in web mercator meters
+
+# Pixel size in web mercator meters
+resolution = 75 
+
+# Globals for calculations
+bounding_box_area = None
+pixel_area = None
+area_range = None
 
 def main():
     
     print "Running analysis.py"
     
-    #initialize()
+    initialize()
     
-    #process_ckan_datasets()
+    process_ckan_datasets()
     
-    generate_composite_image()
+    #generate_composite_image()
     
     print "Done"
 
@@ -36,9 +43,10 @@ def initialize():
     
     global datasets_folder
     
+    # Create the datasets download and analysis folder if it does not exist
     if not os.path.exists(datasets_folder):
         os.makedirs(datasets_folder)
-    
+      
 def process_ckan_datasets():
     
     global ckan_host
@@ -51,15 +59,13 @@ def process_ckan_datasets():
     index = 0;
     for package_id in package_id_list:
         
-        if index >=141 and index <= 500:
+        if index >=4 and index <= 4:
             
             # Get the package details
             package = ckan_client.package_entity_get(package_id)
             
             # Get the package name (slug)
             package_name = package['name']
-            
-            dataset_folder = os.path.join(datasets_folder,package_name)
             
             print "------------------------------"
             print "Processing dataset " + str(index) + " of " + str(len(package_id_list)) + ": " + package_name
@@ -77,22 +83,8 @@ def process_ckan_datasets():
                    (resource['description'] and 'shp' in resource['description'].lower()) or \
                    (resource['description'] and 'shapefile' in resource['description'].lower()):
                     
-                    # Get the download URL
-                    url = resource["url"]
-                    
-                    # Check if the map image exists for this dataset before downloading again
-                    # TODO: Use timestamp of dataset and image
-                    if not os.path.exists(os.path.join(dataset_folder,"map.png")):
-                    
-                        # Download the shapefile
-                        shapefile = download_shapefile(package_name, url)
-                        
-                        # Process the shapefile
-                        if (shapefile != None):
-                            process_shapefile(package_name, shapefile)
-                    else:
-                        print "Map image exists, skipping dataset.."
-                        
+                    process_package_resource(package, resource)
+                                            
         index = index + 1    
 
 def initialize_dataset_folder(package_name):
@@ -108,7 +100,39 @@ def initialize_dataset_folder(package_name):
         os.makedirs(dataset_download_folder)
     
     return dataset_folder
-        
+
+def process_package_resource(package, resource):
+    
+    global datasets_folder
+            
+    # Get the package name
+    package_name = package["name"]
+    
+    # Get the resource URL
+    url = resource["url"]
+    
+    # Get the dataset folder
+    dataset_folder = os.path.join(datasets_folder,package_name)
+                        
+    # Check if the map image exists for this dataset before downloading again
+    # TODO: Compare timestamp of dataset and image and compare image size (may want to regen at different size)
+    if not os.path.exists(os.path.join(dataset_folder,"map.png")):
+    
+        # Download the shapefile
+        shapefile = download_shapefile(package_name, url)
+
+        # Reproject the shapefile
+        if (shapefile != None):
+            projected_shapefile = reproject_shapefile(package_name, shapefile)
+
+        # Rasterize the projected shapefile
+        if (projected_shapefile != None):
+            rasterize_shapefile(package_name, projected_shapefile)
+
+    else:
+        print "Map image exists, skipping dataset.."
+
+    
 def download_shapefile(package_name,url):
     global download_folder
     
@@ -146,14 +170,6 @@ def download_shapefile(package_name,url):
         
     return shapefile
     
-def process_shapefile(package_name, shapefile):
-    
-    projected_shapefile = reproject_shapefile(package_name, shapefile)
-    
-    if (projected_shapefile != None):
-        rasterize_shapefile(package_name, projected_shapefile)
-    
-
 def reproject_shapefile(package_name, shapefile):
     
     global download_folder
@@ -237,8 +253,11 @@ def reproject_shapefile(package_name, shapefile):
     src_shapefile.Destroy()
     
     # Delete the source shapefile
-    shutil.rmtree(source_folder)
-    
+    try:
+        shutil.rmtree(source_folder)
+    except:
+        print "Unable to delete the source shapefile (" + source_folder + ").  Skipping..."
+        
     # create the *.prj file
     if projected_shapefile != None:
         file = open(projected_shapefile_prj, 'w')
@@ -262,19 +281,6 @@ def rasterize_shapefile(package_name, shapefile):
     # Get the spatial reference
     srs = layer.GetSpatialRef()
             
-    # Create a field in the source layer to hold the features colors
-    #field_def = ogr.FieldDefn(RASTERIZE_COLOR_FIELD, ogr.OFTReal)
-    #layer.CreateField(field_def)
-    #layer_def = layer.GetLayerDefn()
-    
-    #field_index = layer_def.GetFieldIndex(RASTERIZE_COLOR_FIELD)
-    
-    # Generate random values for the color field (it's here that the value
-    # of the attribute should be used, but you get the idea)
-    #for feature in layer:
-    #    feature.SetField(field_index, random.randint(0, 255))
-    #   layer.SetFeature(feature)
-        
     # Create the destination data source
     x_res = int((x_max - x_min) / resolution)
     y_res = int((y_max - y_min) / resolution)
@@ -294,20 +300,50 @@ def rasterize_shapefile(package_name, shapefile):
         # Make the target raster have the same projection as the source
         target_ds.SetProjection(srs.ExportToWkt())
         
-    # Rasterize the layer
-    #options=["ATTRIBUTE=%s" % RASTERIZE_COLOR_FIELD]
-    
     # Set the burn value based on the geometry type
     geom_type=layer.GetGeomType()
     if (geom_type == ogr.wkbPolygon):
-        burn_value = 128
+        
+        # Load the shapefile into memory for modification
+        projected_shapefile_memory = ogr.GetDriverByName("Memory").CopyDataSource(projected_shapefile, "")
+        layer_memory = projected_shapefile_memory.GetLayer()
+        
+        # TODO: For polygons, use the polygon size to determine the burn value
+        # The basic idea is that large polygons shouldn't have a big influence on 
+        # open data availability as there isn't a high data density when the polygons are 
+        # large (ex. statewide districts)
+        
+        # Create a field in the source layer to hold the burn value
+        burn_field = "burn_value"
+        field_def = ogr.FieldDefn(burn_field, ogr.OFTReal)
+        layer_memory.CreateField(field_def)
+        layer_memory_def = layer_memory.GetLayerDefn()
+        
+        field_index = layer_memory_def.GetFieldIndex(burn_field)
+        
+        # Generate random values for the color field (it's here that the value
+        # of the attribute should be used, but you get the idea)
+        for feature in layer_memory:
+            geometry = feature.GetGeometryRef()
+            
+            polygon_area = geometry.GetArea()
+            
+            burn_value = compute_polygon_burn_value(polygon_area)
+            
+            feature.SetField(field_index, burn_value)
+            layer_memory.SetFeature(feature)
+            
+            geometry = None
+            feature = None
+            
+        gdal.RasterizeLayer(target_ds, (1, 2, 3), layer_memory, None, options=["ATTRIBUTE=%s" % burn_field])
+        
+        layer_memory = None
+        projected_shapefile_memory = None
+        
     else:
-        burn_value = 255
+        gdal.RasterizeLayer(target_ds, (1, 2, 3), layer, burn_values=(255, 255, 255), options=[])
     
-    err = gdal.RasterizeLayer(target_ds, (1, 2, 3), layer, burn_values=(burn_value, burn_value, burn_value), options=[])
-    if err != 0:
-        raise Exception("error rasterizing layer: %s" % err)
-
     target_ds.FlushCache()
     target_ds = None
     
@@ -334,59 +370,86 @@ def generate_composite_image():
     global datasets_folder
     
     image_count = 0
-    base_image = None
+    base_image_array = None
     
     print "------------------------------"
     print "Generating composite image"
     
-    max = 255
-    alpha_divisor = float(1)
-    
+
     # Find the image maps for each dataset
     for folder in os.listdir(datasets_folder):
         for file in os.listdir(os.path.join(datasets_folder,folder)):
             if file == "map.png":
+             
+                print "Merging image " + str(image_count + 1) + ": " + folder
                 
-                alpha = float(alpha_divisor) / (image_count + 1)
+                # Load the current image as a 16 bit numpy array
+                current_image = Image.open(os.path.join(datasets_folder,folder,file))
                 
-                print "Blending image (alpha: " alpha + ") "+ str(image_count + 1) + ": " + folder
-                
-                image = os.path.join(datasets_folder,folder,file)
-                
-                # Use the first image as the base image
+                current_image_array = numpy.asarray(current_image).astype('uint16')
+
                 if image_count == 0:
-                    base_image = Image.open(image)
+                    # Load the initial image into a numpy 16 bit array
+                    base_image_array = current_image_array
                 else:
                     
-                    # Get the maximum value in the base image
-                    max = base_image.convert('L').getextrema()
-                    
-                    # Average the image into the base image
-                    current_image = Image.open(image)
-                    
-                    # Compute the new alpha
-                    
-                    #print alpha
-                    
-                    Image.blend(base_image,current_image,alpha).save('map.png')
-                    
-                    
-                                        
-                    base_image = Image.open('map.png')
-                
+                    # Add the current image to the base image
+                    base_image_array = base_image_array + current_image_array
+                                    
                 image_count = image_count + 1
+                
+                # Clean up objects in memory
+                del current_image
+                del current_image_array
+
+    # Get the max pixel value
+    pixel_max = base_image_array.max()
+      
+    # Calculate the divisor for the base image to scale back to 8 bit
+    divisor = pixel_max / float(255)
+        
+    # Calculate back to 8 bit range
+    print "Scaling composite image back to 8 bit range (0-255).  Current max pixel value is " + str(pixel_max) + " so will divide by " + str(divisor) + "."
+    base_image_array /= divisor
+        
+    # Convert the array to 8 bit
+    print "Converting to 8 bit image"
+    base_image_array_8bit = base_image_array.astype('uint8')
+        
+    # Save the image
+    print "Saving image file"
+    result_image = Image.fromarray(base_image_array_8bit)
+    result_image.save("map.png")
+    del result_image
     
-        if image_count > 100:
-            break
-        
     print "Composite image complete"            
+
+def compute_polygon_burn_value(area):
+    
+    global bounding_box_area, pixel_area, area_range, x_max, x_min, y_max, y_min, resolution
+    
+    burn_value = 255
+    
+    # Compute the burn values for polygons (larger polygons have less impact on open data 'density')
+    if (bounding_box_area == None or pixel_area == None):  
+        bounding_box_area = (x_max - x_min) * (y_max - y_min)
+        pixel_area = resolution * resolution
+        area_range = bounding_box_area - pixel_area
+    
+    if (area > pixel_area):
         
-    # Merge all of the files together
-        
-        #if os.path.isdir(folder):
-        #    #if file.endswith(".shp"):
-        #    #    shapefile = os.path.join(dataset_download_folder,file)
-        #    print "whee" + folder
+         # Get the difference from the pixel area
+         area_delta = area - pixel_area
+         
+         # Calculate percentage value along range
+         area_delta_percentage = float(area_delta) / float(area_range)
+         
+         # Get the burn value as the inverse percentage of the total
+         burn_value = int((float(1)) / (float(burn_value) * area_delta_percentage))
+         
+         print str(area) + " of " + str(bounding_box_area) + ".  Percentage: " + str(area_delta_percentage * 100) + "% Burn value:" + str(burn_value) 
+                     
+    return burn_value
     
 #Execute main function    
 if __name__ == '__main__':
