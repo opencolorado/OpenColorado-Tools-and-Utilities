@@ -20,7 +20,7 @@ y_min = 4438050.84302
 y_max = 5012849.66619
 
 # Pixel size in web mercator meters
-resolution = 80
+resolution = 100
 
 # Globals for calculations
 bounding_box_area = None
@@ -38,6 +38,8 @@ def main():
     process_ckan_datasets()
     
     generate_composite_image()
+    
+    colorize_composite_image()
     
     print "Done"
 
@@ -133,9 +135,10 @@ def process_package_resource(package, resource):
             shapefile = shapefile_projected
         
         # Rasterize the projected shapefile
-        if (shapefile_projected != None):
+        if os.path.exists(shapefile_projected):
             rasterize_shapefile(package_name, shapefile_projected)
-
+        else:
+            print "Unable to find shapefile in downloaded resource: " + url
     else:
         print "Map image exists, skipping dataset.."
 
@@ -438,7 +441,10 @@ def compute_polygon_burn_value(area):
     burn_value = 255
     
     # Settings for burn value decay rate
-        
+    
+    # Maximum burn value for a polygon
+    max_burn_value = 128
+    
     # Maximum polygon size relative to the bounding bounding area to have a burn weight
     max_polygon_size_ratio = float(0.2) # 20%
     
@@ -458,13 +464,62 @@ def compute_polygon_burn_value(area):
         area_delta_percentage = float(1) - (float(area) / float(bounding_box_area))**(float(1) / float(decay_rate))
         
         # Get the burn value as the inverse percentage of the total
-        burn_value = int(area_delta_percentage * float(burn_value))
+        burn_value = int(area_delta_percentage * float(max_burn_value))
         
         #print str(area) + " of " + str(bounding_box_area) + ".  Percentage: " + str(area_delta_percentage * 100) + "% Burn value:" + str(burn_value)
     elif area > bounding_box_area:
         burn_value = 0
         
     return burn_value
+
+def colorize_composite_image():
+    
+    # Open the composite image
+    image = Image.open("map.png")
+    
+    # Add an alpha channel
+    image = image.convert("RGBA")
+    
+    # Open the color scheme
+    scheme = Image.open(os.path.join("scheme", "classic.png"))
+    
+    # Set the pixel value at which alpha is applied (0 will have 0 alpha)
+    alpha_threshold = 0
+    
+    # Convert the scheme into a list of color value tuples
+    colors = []
+    for row in range(256):
+        scheme_pixel = scheme.getpixel((0,255-row))
+        
+        # Calculate the alpha value
+        alpha = 255
+        if row < alpha_threshold:
+            alpha = int(float(255) * float(row) / float(alpha_threshold))
+            
+        # If no alpha channel, add an alpha of 255
+        if len(scheme_pixel) == 3:
+            scheme_pixel = (scheme_pixel[0], scheme_pixel[1], scheme_pixel[2], alpha)
+        
+        colors.append(scheme_pixel)
+            
+    # Load the image pixels for rapid updating
+    pixels = image.load()
+        
+    # Iterate through all of pixels in the composite image
+    w,h = image.size
+    
+    for x in range(w):
+        for y in range(h):
+            
+            # Get the pixel at the location
+            pixel = pixels[x,y]
+                        
+            # Get the color to set the pixel based on the value of the first band
+            color = list(colors[pixel[0]])
+                                      
+            pixels[x,y] = (color[0], color[1], color[2], color[3])
+    
+    image.save("map_colorized.png")
     
 #Execute main function    
 if __name__ == '__main__':

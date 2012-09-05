@@ -13,7 +13,8 @@ local.properties
 .settings/
 .loadpath
 *.pyc
-*.png
+**/datasets/*.png
+**/Analysis/*.png
 ~$*
 
 # External tool builders
