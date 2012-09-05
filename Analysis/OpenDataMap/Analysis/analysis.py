@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 # Generate a heat map from shapefiles in a CKAN data catalog
 #----------------------------------------------------------------------------
-import random, os, sys, Image, ImageFilter, urllib2, zipfile, shutil, numpy
+import os, sys, Image, ImageFilter, urllib2, zipfile, shutil, numpy, math
 import ckanclient
 from osgeo import gdal, ogr, osr
 
@@ -20,12 +20,14 @@ y_min = 4438050.84302
 y_max = 5012849.66619
 
 # Pixel size in web mercator meters
-resolution = 75 
+resolution = 80
 
 # Globals for calculations
 bounding_box_area = None
 pixel_area = None
 area_range = None
+
+force_rasterize = True
 
 def main():
     
@@ -35,7 +37,7 @@ def main():
     
     process_ckan_datasets()
     
-    #generate_composite_image()
+    generate_composite_image()
     
     print "Done"
 
@@ -59,7 +61,7 @@ def process_ckan_datasets():
     index = 0;
     for package_id in package_id_list:
         
-        if index >=4 and index <= 4:
+        if index >=1 and index <= 1000:
             
             # Get the package details
             package = ckan_client.package_entity_get(package_id)
@@ -103,7 +105,7 @@ def initialize_dataset_folder(package_name):
 
 def process_package_resource(package, resource):
     
-    global datasets_folder
+    global datasets_folder, force_rasterize
             
     # Get the package name
     package_name = package["name"]
@@ -116,18 +118,23 @@ def process_package_resource(package, resource):
                         
     # Check if the map image exists for this dataset before downloading again
     # TODO: Compare timestamp of dataset and image and compare image size (may want to regen at different size)
-    if not os.path.exists(os.path.join(dataset_folder,"map.png")):
+    if force_rasterize or not os.path.exists(os.path.join(dataset_folder,"map.png")):
     
-        # Download the shapefile
-        shapefile = download_shapefile(package_name, url)
+        # If the projected shapefile exists don't download it again
+        shapefile_projected = os.path.join(dataset_folder,"download","projected","projected.shp")
+        if not os.path.exists(shapefile_projected):
+            # Download the shapefile
+            shapefile = download_shapefile(package_name, url)
 
-        # Reproject the shapefile
-        if (shapefile != None):
-            projected_shapefile = reproject_shapefile(package_name, shapefile)
-
+            # Reproject the shapefile
+            if (shapefile != None):
+                projected_shapefile = reproject_shapefile(package_name, shapefile)
+        else:
+            shapefile = shapefile_projected
+        
         # Rasterize the projected shapefile
-        if (projected_shapefile != None):
-            rasterize_shapefile(package_name, projected_shapefile)
+        if (shapefile_projected != None):
+            rasterize_shapefile(package_name, shapefile_projected)
 
     else:
         print "Map image exists, skipping dataset.."
@@ -354,8 +361,8 @@ def rasterize_shapefile(package_name, shapefile):
     im = im.convert("L")
     
     # If the type is not polygon, apply some smoothing
-    if (geom_type != ogr.wkbPolygon):
-        im = im.filter(ImageFilter.SMOOTH)
+    #if (geom_type != ogr.wkbPolygon):
+    #    im = im.filter(ImageFilter.SMOOTH)
     
     # Save to a PNG image
     im.save(output_png)
@@ -426,29 +433,37 @@ def generate_composite_image():
 
 def compute_polygon_burn_value(area):
     
-    global bounding_box_area, pixel_area, area_range, x_max, x_min, y_max, y_min, resolution
+    global bounding_box_area, area_range, x_max, x_min, y_max, y_min, resolution
     
     burn_value = 255
     
+    # Settings for burn value decay rate
+        
+    # Maximum polygon size relative to the bounding bounding area to have a burn weight
+    max_polygon_size_ratio = float(0.2) # 20%
+    
+    # Decay rate of burn value (exponential) as polygons increase in size from 0
+    decay_rate = 10
+    
     # Compute the burn values for polygons (larger polygons have less impact on open data 'density')
     if (bounding_box_area == None or pixel_area == None):  
-        bounding_box_area = (x_max - x_min) * (y_max - y_min)
-        pixel_area = resolution * resolution
-        area_range = bounding_box_area - pixel_area
+        bounding_box_area = ((x_max - x_min) * (y_max - y_min)) * max_polygon_size_ratio
     
-    if (area > pixel_area):
+    if (area > 0 and area < bounding_box_area):
+                
+        # Calculate percentage of burn value to use
+        # We want to weight of the smaller polygons to be much higher so we use
+        # the sq. root of the inverse percentage of the area to rapidly unweight 
+        #
+        area_delta_percentage = float(1) - (float(area) / float(bounding_box_area))**(float(1) / float(decay_rate))
         
-         # Get the difference from the pixel area
-         area_delta = area - pixel_area
-         
-         # Calculate percentage value along range
-         area_delta_percentage = float(area_delta) / float(area_range)
-         
-         # Get the burn value as the inverse percentage of the total
-         burn_value = int((float(1)) / (float(burn_value) * area_delta_percentage))
-         
-         print str(area) + " of " + str(bounding_box_area) + ".  Percentage: " + str(area_delta_percentage * 100) + "% Burn value:" + str(burn_value) 
-                     
+        # Get the burn value as the inverse percentage of the total
+        burn_value = int(area_delta_percentage * float(burn_value))
+        
+        #print str(area) + " of " + str(bounding_box_area) + ".  Percentage: " + str(area_delta_percentage * 100) + "% Burn value:" + str(burn_value)
+    elif area > bounding_box_area:
+        burn_value = 0
+        
     return burn_value
     
 #Execute main function    
