@@ -182,15 +182,19 @@ def get_dataset_entity(dataset):
             resource["name"] = dataset_entity['title']
             
             if (field_item_label.startswith("kml")):
+                resource["format"] = "KML"
                 resource["name"] = dataset_entity['title'] + " - KML"
                 resource["mimetype"] = "application/vnd.google-earth.kmz"
             elif (field_item_label.startswith("wms")):
+                resource["format"] = "WMS"
                 resource["name"] = dataset_entity['title'] + " - WMS"
                 resource["mimetype"] = "application/wms"
             elif (field_item_label.startswith("georss")):
+                resource["format"] = "RSS"
                 resource["name"] = dataset_entity['title'] + " - GeoRSS"
                 resource["mimetype"] = "application/rss"
             elif (field_item_label.startswith("shapefile")):
+                resource["format"] = "SHP"
                 resource["name"] = dataset_entity['title'] + " - SHP"
                 resource["mimetype"] = "application/zip"
             
@@ -213,6 +217,7 @@ def get_dataset_entity(dataset):
                 resource["url"] = base_url + filefield_file_link
                 
             resource["name"] = filefield_file_label
+            resource["format"] = "PDF"
             resource["mimetype"] = "application/pdf" #Hack, need to get this from URL?    
             resources.append(resource) 
 
@@ -310,6 +315,7 @@ def update_dataset(dataset_entity_remote, dataset_entity):
             print("found")
             resource_remote["url"] = resource["url"]
             resource_remote["name"] = resource["name"]
+            resource_remote["format"] = resource["format"]
             resource_remote["mimetype"] = resource["mimetype"]
         else:
             print("not found")
