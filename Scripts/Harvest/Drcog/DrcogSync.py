@@ -29,26 +29,48 @@ ckan_license = "cc-by"
 
 def main():
     
+    localtime = time.asctime( time.localtime(time.time())) 
+    print "-----------------------------------------------------"
+    print str(localtime) + " - starting synchronization"
+    print "-----------------------------------------------------"
+    
     # Get a list of subjects from the DRCOG catalog
     subjects = get_subjects()
     
     datasets = []
     
     # Get all datasets by subject (datasets may be in more than one subject so there could be duplicates here)
+    print "Building list of unique datasets"
     for subject in subjects:
+        sys.stdout.write('.')
         datasets = datasets + get_dataset_urls_by_subject(subject)
-        #break # Just do the first subject for now
+        break # Just do the first subject for now
+    
+    print ""
     
     # Remove duplicates
     datasets = list(set(datasets))
     
+    print str(len(datasets)) + " datasets found"
+    
+    # Remove datasets from CKAN that are no longer provided by DRCOG
+    #TODO
+    
     # Begin syncing each dataset to CKAN
+    print "Syncing DRCOG datasets to OpenColorado"
     for dataset in datasets:
+        print "------------------------------------------------------------------"
+        print "Dataset: " + dataset
         dataset_entity = get_dataset_entity(dataset)
         publish_to_ckan(dataset_entity)
         
         #break #Just do the first dataset for now
 
+    localtime = time.asctime( time.localtime(time.time())) 
+    print "-----------------------------------------------------"
+    print str(localtime) + " - Synchronization complete"
+    print "-----------------------------------------------------"
+    
 def retry(ExceptionToCheck, tries=3, delay=3, backoff=2, logger=None):
     """Retry calling the decorated function using an exponential backoff.
 
@@ -101,6 +123,8 @@ def get_subjects():
     """
     global base_url, subjects_url_prefix
     
+    print "Getting list of subjects from DRCOG data catalog"
+    
     subjects = []
     subjects_url = base_url + "/datacatalog/content/welcome-regional-data-catalog?quicktabs_tabbed_menu_homepage=1"
     
@@ -111,7 +135,9 @@ def get_subjects():
         if href.startswith(subjects_url_prefix):
             subject = href.replace(subjects_url_prefix,"")
             subjects.append(subject)
-            
+    
+    print "Retrieved subjects"
+    
     return subjects
 
 @retry(Exception)
@@ -125,7 +151,7 @@ def get_dataset_urls_by_subject(subject, page_url=None):
     if page_url != None:
         datasets_url = base_url + page_url
         
-    print datasets_url
+    #print datasets_url
     
     soup = get_soup_from_url(datasets_url)
     
@@ -156,17 +182,15 @@ def get_dataset_entity(dataset):
     dataset_url = base_url + dataset_url_prefix + dataset
     
     dataset_entity = {}
-    
-    print dataset_url
-    
+        
     soup = get_soup_from_url(dataset_url)
-
+    
     # Scrape the content from the dataset page
     dataset_entity['name'] = ckan_name_prefix + dataset
     dataset_entity['title'] = ckan_title_prefix + soup.find("h1",{ "id" : "page-title" }).getText()
     dataset_entity['license_id'] = ckan_license
-    dataset_entity['url'] = dataset_url
-    
+    dataset_entity['url'] = dataset_url   
+        
     resources = []
  
     # Get the tags
@@ -180,9 +204,7 @@ def get_dataset_entity(dataset):
             tag = tag.lower().replace(')','')
             tags.append(tag)
     dataset_entity['tags'] = tags
-    
-    print(tags)
-            
+                
         
     # Get descriptive information
     for field_item in soup.findAll("div", { "class" : "field-item" }):
@@ -253,7 +275,6 @@ def get_dataset_entity(dataset):
         filefield_file_link = filefield_file.a.get('href')
         filefield_file_mimetype = filefield_file.a.get('type')
         
-        print(filefield_file_link) 
         if (filefield_file_mimetype.startswith("application/pdf")) :            
             resource = {}
             if (filefield_file_link.startswith("http")):
@@ -269,6 +290,15 @@ def get_dataset_entity(dataset):
     # Add the resources to the dataset
     dataset_entity["resources"] = resources
     
+    print "  Retrieved dataset details from DRCOG catalog" 
+    print "    Name: " +  dataset_entity['name']
+    print "    Title: " +  dataset_entity['title']
+    print "    Tags:" + str(dataset_entity['tags'])
+    print "    Resources:"
+    for resource in dataset_entity["resources"]:
+        print "      " + resource["format"] + " (" + resource["mimetype"] + "): " + resource["url"]  
+    print ""
+    
     return dataset_entity
 
 @retry(Exception)
@@ -279,6 +309,8 @@ def publish_to_ckan(dataset_entity):
         None
     """
     global ckan_client, ckan_host, ckan_key
+    
+    print "Publishing dataset to CKAN"
     
     # Initialize the CKAN client  
     ckan_client = ckanclient.CkanClient(base_location=ckan_host,api_key=ckan_key)
@@ -312,10 +344,9 @@ def create_dataset(dataset_entity):
     try:
         group_entity = ckan_client.group_entity_get(ckan_group)
         if group_entity is not None:
-            print('Adding dataset to group: ' + ckan_group)      
+            print('  Adding dataset to group: ' + ckan_group)      
             dataset_entity['groups'] = [group_entity['id']]
     except ckanclient.CkanApiNotFoundError:
-        logger.warn('Group: ' + args.ckan_group_name + ' not found on OpenColorado')
         dataset_entity['groups'] = []     
      
     ckan_client.package_register_post(dataset_entity)
@@ -345,6 +376,8 @@ def update_dataset(dataset_entity_remote, dataset_entity):
     if not 'resources' in dataset_entity_remote:
        dataset_entity_remote['resources'] = []
         
+
+    print "    Updating resources:"
     for resource in dataset_entity['resources']:
         
         mimetype = ""
@@ -360,13 +393,13 @@ def update_dataset(dataset_entity_remote, dataset_entity):
                 break
         
         if (found) :
-            print("found")
+            print "      Resource found (" + mimetype + ").  Updating..."
             resource_remote["url"] = resource["url"]
             resource_remote["name"] = resource["name"]
             resource_remote["format"] = resource["format"]
             resource_remote["mimetype"] = resource["mimetype"]
         else:
-            print("not found")
+            print "      Resource not found (" + mimetype + ").  Adding..."
             dataset_entity_remote['resources'].append(resource)
             
     ckan_client.package_entity_put(dataset_entity_remote)
@@ -389,10 +422,10 @@ def get_remote_dataset(dataset_id):
     try:
         # Get the dataset
         dataset_entity = ckan_client.package_entity_get(dataset_id)
-        print("Dataset " + dataset_id + " found on OpenColorado")
+        print("  Dataset found on OpenColorado")
         
     except ckanclient.CkanApiNotFoundError:
-        print("Dataset " + dataset_id + " not found on OpenColorado")
+        print("  Dataset not found on OpenColorado")
 
     return dataset_entity
 
