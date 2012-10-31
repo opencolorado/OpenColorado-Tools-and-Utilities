@@ -34,35 +34,22 @@ def main():
     print str(localtime) + " - starting synchronization"
     print "-----------------------------------------------------"
     
-    # Get a list of subjects from the DRCOG catalog
-    subjects = get_subjects()
+    # Get the current list of CKAN datasets on OpenColorado
+    ckan_datasets = get_ckan_datasets()
     
-    datasets = []
-    
-    # Get all datasets by subject (datasets may be in more than one subject so there could be duplicates here)
-    print "Building list of unique datasets"
-    for subject in subjects:
-        sys.stdout.write('.')
-        datasets = datasets + get_dataset_urls_by_subject(subject)
-        break # Just do the first subject for now
-    
-    print ""
-    
-    # Remove duplicates
-    datasets = list(set(datasets))
-    
-    print str(len(datasets)) + " datasets found"
-    
+    # Get the current list of datasets on DRCOG
+    drcog_datasets = get_drcog_datasets()
+
     # Remove datasets from CKAN that are no longer provided by DRCOG
-    #TODO
+    delete_removed_datasets(drcog_datasets, ckan_datasets)
     
     # Begin syncing each dataset to CKAN
     print "Syncing DRCOG datasets to OpenColorado"
-    for dataset in datasets:
+    for drcog_dataset in drcog_datasets:
         print "------------------------------------------------------------------"
-        print "Dataset: " + dataset
-        dataset_entity = get_dataset_entity(dataset)
-        publish_to_ckan(dataset_entity)
+        print "Dataset: " + drcog_dataset
+        drcog_dataset_entity = get_dataset_entity(drcog_dataset)
+        publish_to_ckan(drcog_dataset_entity)
         
         #break #Just do the first dataset for now
 
@@ -114,6 +101,103 @@ def retry(ExceptionToCheck, tries=3, delay=3, backoff=2, logger=None):
         return f_retry  # true decorator
     return deco_retry
 
+@retry(Exception)
+def get_ckan_datasets():
+    """Gets the current DCROG datasets on OpenColorado
+        
+    Returns:
+        None
+    """
+    global ckan_group, ckan_client, ckan_host, ckan_key
+    
+    print "Getting DRCOG datasets from OpenColorado"
+    
+    # Initialize the CKAN client  
+    ckan_client = ckanclient.CkanClient(base_location=ckan_host,api_key=ckan_key)
+                                        
+    results = ckan_client.package_search(None, search_options={'groups': ckan_group, 'all_fields': 1, 'limit': 5000})
+        
+    datasets = list(results["results"])
+    
+    print str(len(datasets)) + " datasets found"
+    
+    return datasets    
+
+def get_drcog_datasets():
+    """Gets the current datasets on DRCOG
+        
+    Returns:
+        List of datasets
+    """
+    # Get a list of subjects from the DRCOG catalog
+    datasets = []
+    subjects = get_subjects()
+    
+    # Get all datasets by subject (datasets may be in more than one subject so there could be duplicates here)
+    print "Getting datasets from DRCOG data catalog"
+    for subject in subjects:
+        sys.stdout.write('.')
+        datasets = datasets + get_dataset_urls_by_subject(subject)
+        #break # Just do the first subject for now
+    
+    print ""
+    
+    # Remove duplicates
+    datasets = list(set(datasets))
+    
+    print str(len(datasets)) + " datasets found"
+    
+    return datasets
+
+def delete_removed_datasets(drcog_datasets,ckan_datasets):
+    """Removes datasets from CKAN that are no longer published by DRCOG
+
+    Parameters:
+        drcog_datasets - The list of datasets currently provided by DRCOG
+        ckan_datasets - The list of datasets from DRCOG currently on OpenColorado
+    
+    Returns:
+        None
+    """   
+    global ckan_name_prefix
+    
+    datasets_to_remove = []
+    
+    print "Checking datasets to remove from OpenColorado"
+    for ckan_dataset in ckan_datasets:
+        ckan_dataset_name = ckan_dataset["name"]
+        found = False
+        
+        for drcog_dataset in drcog_datasets:
+            drcog_dataset_name = ckan_name_prefix + drcog_dataset
+            
+            if (drcog_dataset_name == ckan_dataset_name):
+                found = True
+                break
+        
+        if (found == False):
+            datasets_to_remove.append(ckan_dataset_name)
+    
+    print str(len(datasets_to_remove)) + " marked for deletion from OpenColorado:"
+    for dataset_to_remove in datasets_to_remove:
+        print "  -" + dataset_to_remove
+    
+    # Delete the datasets
+    for dataset_to_remove in datasets_to_remove:
+        delete_ckan_dataset(dataset_to_remove)
+        
+@retry(Exception)
+def delete_ckan_dataset(name):
+    
+    global ckan_client, ckan_host, ckan_key
+    
+    # Initialize the CKAN client  
+    ckan_client = ckanclient.CkanClient(base_location=ckan_host,api_key=ckan_key)
+            
+    print "  Deleting CKAN dataset " + name                            
+    results = ckan_client.package_entity_delete(name)
+        
+    
 @retry(Exception)        
 def get_subjects():
     """Gets a list of subjects from the DRCOG data catalog
@@ -350,7 +434,7 @@ def create_dataset(dataset_entity):
         dataset_entity['groups'] = []     
      
     ckan_client.package_register_post(dataset_entity)
-
+    
 @retry(Exception)
 def update_dataset(dataset_entity_remote, dataset_entity):
     """Updates a dataset
