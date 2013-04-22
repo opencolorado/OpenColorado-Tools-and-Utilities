@@ -61,6 +61,14 @@ staging_feature_class = None
 ckan_client = None
 temp_workspace = None
 available_formats = ['shp','dwg','kml','csv','metadata']
+    
+outCoordSystem = "GEOGCS['GCS_WGS_1984',\
+    DATUM['D_WGS_1984',\
+    SPHEROID['WGS_1984',6378137.0,298.257223563]],\
+    PRIMEM['Greenwich',0.0],\
+    UNIT['Degree',0.0174532925199433]]"
+        
+geographicTransformation = "NAD_1983_HARN_To_WGS_1984"
 
 def main():
     """Main function
@@ -238,6 +246,10 @@ def main():
         
         # Export and copy formats to the output folder 
         if args.exe_result != 'publish':
+            
+            # Set the output coordinate system for the arcpy environment
+            arcpy.env.outputCoordinateSystem = outCoordSystem
+            arcpy.env.geographicTransformations = geographicTransformation            
             
             # Export to the various file formats
             if (len(args.formats) > 0):
