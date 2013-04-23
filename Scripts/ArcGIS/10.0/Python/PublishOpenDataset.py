@@ -52,7 +52,7 @@
 # ---------------------------------------------------------------------------
 
 # Import system modules
-import sys, os, arcpy, logging, logging.config, shutil, zipfile, glob, ckanclient, datetime, argparse, csv
+import sys, os, arcpy, logging, logging.config, shutil, zipfile, glob, ckanclient, datetime, argparse, csv, re
 import xml.etree.ElementTree as et
 
 # Global variables
@@ -1151,6 +1151,27 @@ def get_file_size(file_path):
         logger.warn('Unable to retrieve file size for resource: ' + file_path)
     
     return file_size 
+
+def slugify_string(in_str):
+    """Turns a string into a slug.
+    
+    Parameters:
+        in_str - The input string.
+    
+    Returns:
+        A slugified string. 
+    """
+    
+    # Collapse all white space and to a single hyphen
+    slug = re.sub('\\s+', '-', in_str)
+    
+    # Remove all instances of camel-case text and convert to hyphens. Remove leading and trailing hyphen.
+    slug = re.sub('(((?<=[a-z])[A-Z])|([A-Z](?![A-Z]|$)))', '-\\1', slug).lower().strip('-')
+    
+    # Collapse any duplicate hyphens
+    slug = re.sub('-+', '-', slug)
+          
+    return slug;
             
 def update_local_dataset_from_metadata(dataset_entity):
     """Updates the CKAN dataset entity by reading in metadata
@@ -1244,8 +1265,7 @@ def update_local_dataset_from_metadata(dataset_entity):
     keyword_elements = theme_keyword_elements + place_keyword_elements
     
     for keyword_element in keyword_elements:
-        keyword = keyword_element.text
-        keyword = keyword.lower().replace(' ','-')
+        keyword = slugify_string(keyword_element.text)
         keywords.append(keyword)
         logger.debug('Keywords found in metadata: ' + keyword);
 
