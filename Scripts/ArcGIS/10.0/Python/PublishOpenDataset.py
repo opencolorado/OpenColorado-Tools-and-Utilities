@@ -16,6 +16,7 @@
 #    c. KML (zipped KMZ)
 #    d. CSV (csv file)
 #    e. Metadata (xml)
+#    f. Esri File Geodatabase (zipped)
 #
 #    The script automatically manages the creation of output folders if they
 #    do not already exist.  Also creates temp folders for processing as
@@ -36,6 +37,8 @@
 #                    |- <dataset_name>.csv
 #                |- metadata 
 #                    |- <dataset_name>.xml
+#                |- gdb
+#                    |- <dataset_name>.zip
 #
 # 2) Reads the exported ArcGIS Metadata xml file and parses the relevant
 #    metadata fields to be published to the OpenColorado Data Repository.
@@ -60,7 +63,7 @@ source_feature_class = None
 staging_feature_class = None
 ckan_client = None
 temp_workspace = None
-available_formats = ['shp','dwg','kml','csv','metadata']
+available_formats = ['shp','dwg','kml','csv','metadata','gdb']
     
 outCoordSystem = "GEOGCS['GCS_WGS_1984',\
     DATUM['D_WGS_1984',\
@@ -110,8 +113,8 @@ def main():
     parser.add_argument('-f', '--formats',
         action='store',
         dest='formats', 
-        default='shp,dwg,kml,csv,metadata',
-        help='Specific formats to publish (shp=Shapefile, dwg=CAD drawing file, kml=Keyhole Markup Language, metadata=Metadata).  If not specified all formats will be published.')
+        default='shp,dwg,kml,csv,metadata,gdb',
+        help='Specific formats to publish (shp=Shapefile, dwg=CAD drawing file, kml=Keyhole Markup Language, metadata=Metadata, gdb=File Geodatabase).  If not specified all formats will be published.')
         
     parser.add_argument('-a', '--ckan-api',
         action='store', 
@@ -278,6 +281,10 @@ def main():
                 logger.info('Exporting metadata XML file')
                 publish_metadata()
 
+            if 'gdb' in args.formats:
+                logger.info('Publishing file geodatabase')
+                publish_file_geodatabase()
+               
         # Update the dataset information on the CKAN repository
         # if the exe_result is equal to 'publish' or 'both'.
         if args.exe_result != 'export':
@@ -289,7 +296,8 @@ def main():
 
         # Delete the dataset temp folder
         # TODO: This delete statement was failing at the end of the script, but
-        # works at the beginning. It should really go at the end here:
+        # works at the beginning. The script does not release the file geodatabase lock
+        # until the arcpy process exits. Clean up should go at the end here:
         # delete_dataset_temp_folder()
 
         logger.info("Done - PublishOpenDataset " + args.dataset_name)
@@ -487,6 +495,33 @@ def export_file_geodatabase():
     arcpy.CopyFeatures_management(source_feature_class, gdb_feature_class)
     
     return gdb_feature_class
+
+def publish_file_geodatabase():
+    """Publishes the already exported file geodatabase to the Open Data Catalog
+    
+    Returns:
+        None
+    """    
+    
+    folder = 'gdb'
+    name = get_dataset_filename()
+    
+    # Get the name of the temp gdb directory
+    temp_working_folder = os.path.join(temp_workspace,folder)
+
+    # Zip up the gdb folder contents
+    logger.debug('Zipping the file geodatabase')
+    zip_file_name = os.path.join(temp_working_folder,name + ".zip")
+    zip_file = zipfile.ZipFile(zip_file_name, "w")   
+    gdb_file_name = os.path.join(temp_working_folder,name + ".gdb") 
+    for filename in glob.glob(gdb_file_name + "/*"):
+        if (not filename.endswith('.lock')):
+            zip_file.write(filename, name + ".gdb/" + os.path.basename(filename), zipfile.ZIP_DEFLATED)
+            
+    zip_file.close()    
+               
+    # Publish the file geodatabase to the download folder
+    publish_file(temp_working_folder, name + ".zip","gdb")
     
 def export_shapefile():
     """Exports the feature class as a zipped shapefile
@@ -639,7 +674,7 @@ def publish_metadata():
     temp_working_folder = os.path.join(temp_workspace,folder)
         
     # Publish the metadata to the download folder
-    publish_file(temp_working_folder, name + ".xml","metadata")        
+    publish_file(temp_working_folder, name + ".xml","metadata")
 
 def export_csv():
     """Exports the feature class as a csv file
@@ -695,7 +730,7 @@ def export_csv():
     # Publish the csv to the download folder
     publish_file(temp_working_folder, name + ".csv","csv")
 
-def    drop_exclude_fields():
+def drop_exclude_fields():
     """Removes all fields (columns) from a dataset passed into the exclude-fields
     parameter.
     
@@ -1013,6 +1048,23 @@ def update_dataset_resources(dataset_entity):
         metadata_resource['url'] = args.download_url + dataset_file_name + '/metadata/' + dataset_file_name + '.xml'
         metadata_resource['mimetype'] = 'application/xml'
         metadata_resource['format'] = 'XML'
+        
+    if 'gdb' in args.formats:
+        
+        gdb_resource = get_resource_by_format(resources, 'gdb')
+        
+        if (gdb_resource is None):
+            logger.info('Creating new gdb resource')
+            gdb_resource = {}
+            resources.append(gdb_resource)
+        else:            
+            logger.info('Updating GDB resource')
+        
+        gdb_resource['name'] = title + ' - GDB'
+        gdb_resource['description'] = title
+        gdb_resource['url'] = args.download_url + dataset_file_name + '/gdb/' + dataset_file_name + '.zip'
+        gdb_resource['mimetype'] = 'application/zip'
+        gdb_resource['format'] = 'GDB'        
                     
     # Update the resources on the dataset                    
     dataset_entity['resources'] = resources;
