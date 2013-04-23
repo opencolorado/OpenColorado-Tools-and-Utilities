@@ -1169,7 +1169,7 @@ def update_local_dataset_from_metadata(dataset_entity):
 
     # Get the keywords
     keywords = []
-    
+   
     # If the dataset has existing tags, check for the 'featured'
     # tag and preserve it if it exists
     if ('tags' in dataset_entity):
@@ -1194,6 +1194,9 @@ def update_local_dataset_from_metadata(dataset_entity):
         keywords.append(keyword)
         logger.debug('Keywords found in metadata: ' + keyword);
 
+    # Add the GIS keyword to all datasets published by this script
+    keywords.append('gis')
+    
     dataset_entity['tags'] = keywords
 
     return dataset_entity
