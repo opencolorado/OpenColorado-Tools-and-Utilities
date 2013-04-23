@@ -965,7 +965,7 @@ def update_dataset_resources(dataset_entity):
     
     # Export to the various file formats
     if 'shp' in args.formats:
-        
+               
         shp_resource = get_resource_by_format(resources, 'shp')
         
         if (shp_resource is None):
@@ -976,11 +976,17 @@ def update_dataset_resources(dataset_entity):
             logger.info('Updating SHP resource')
         
         shp_resource['name'] = title + ' - SHP'
-        shp_resource['description'] = title
+        shp_resource['description'] = title + ' - Shapefile'
         shp_resource['url'] = args.download_url + dataset_file_name + '/shape/' + dataset_file_name + '.zip'
         shp_resource['mimetype'] = 'application/zip'
-        shp_resource['format'] = 'SHP'
-    
+        shp_resource['format'] = 'shp'
+        shp_resource['resource_type'] = 'file'
+
+        # Get the size of the file
+        file_size = get_file_size(output_folder + '\\shape\\' + dataset_file_name + '.zip')
+        if file_size:
+            shp_resource['size'] = file_size         
+
     if 'dwg' in args.formats:
 
         dwg_resource = get_resource_by_format(resources, 'dwg')
@@ -993,10 +999,16 @@ def update_dataset_resources(dataset_entity):
             logger.info('Updating DWG resource')
         
         dwg_resource['name'] = title + ' - DWG'
-        dwg_resource['description'] = title
+        dwg_resource['description'] = title  + ' - AutoCAD DWG'
         dwg_resource['url'] = args.download_url + dataset_file_name + '/cad/' + dataset_file_name + '.dwg'
         dwg_resource['mimetype'] = 'application/acad'
-        dwg_resource['format'] = 'DWG'    
+        dwg_resource['format'] = 'dwg'
+        dwg_resource['resource_type'] = 'file'
+
+        # Get the size of the file
+        file_size = get_file_size(output_folder + '\\cad\\' + dataset_file_name + '.dwg')
+        if file_size:
+            dwg_resource['size'] = file_size         
 
     if 'kml' in args.formats:
         
@@ -1010,27 +1022,39 @@ def update_dataset_resources(dataset_entity):
             logger.info('Updating KML resource')
 
         kml_resource['name'] = title + ' - KML'
-        kml_resource['description'] = title
+        kml_resource['description'] = title  + ' - Google KML'
         kml_resource['url'] = args.download_url + dataset_file_name + '/kml/' + dataset_file_name + '.kmz'
         kml_resource['mimetype'] = 'application/vnd.google-earth.kmz'
-        kml_resource['format'] = 'KML'
+        kml_resource['format'] = 'kml'
+        kml_resource['resource_type'] = 'file'
+        
+        # Get the size of the file
+        file_size = get_file_size(output_folder + '\\kml\\' + dataset_file_name + '.kmz')
+        if file_size:
+            kml_resource['size'] = file_size          
 
     if 'csv' in args.formats:
         
         csv_resource = get_resource_by_format(resources, 'csv')
         
         if (csv_resource is None):
-            logger.info('Creating new CSV resource')        
+            logger.info('Creating new CSV resource')
             csv_resource = {}
             resources.append(csv_resource)
         else:            
             logger.info('Updating CSV resource')
 
         csv_resource['name'] = title + ' - CSV'
-        csv_resource['description'] = title
+        csv_resource['description'] = title + ' - Comma-Separated Values'
         csv_resource['url'] = args.download_url + dataset_file_name + '/csv/' + dataset_file_name + '.csv'
         csv_resource['mimetype'] = 'text/csv'
-        csv_resource['format'] = 'CSV'
+        csv_resource['format'] = 'csv'
+        csv_resource['resource_type'] = 'file'
+        
+        # Get the size of the file
+        file_size = get_file_size(output_folder + '\\csv\\' + dataset_file_name + '.csv')
+        if file_size:
+            csv_resource['size'] = file_size          
 
     if 'metadata' in args.formats:
         
@@ -1044,10 +1068,16 @@ def update_dataset_resources(dataset_entity):
             logger.info('Updating Metadata resource')
 
         metadata_resource['name'] = title + ' - Metadata'
-        metadata_resource['description'] = 'Metadata'
+        metadata_resource['description'] = title + ' - Metadata'
         metadata_resource['url'] = args.download_url + dataset_file_name + '/metadata/' + dataset_file_name + '.xml'
         metadata_resource['mimetype'] = 'application/xml'
-        metadata_resource['format'] = 'XML'
+        metadata_resource['format'] = 'xml'
+        metadata_resource['resource_type'] = 'metadata'
+        
+        # Get the size of the file
+        file_size = get_file_size(output_folder + '\\metadata\\' + dataset_file_name + '.xml')
+        if file_size:
+            metadata_resource['size'] = file_size          
         
     if 'gdb' in args.formats:
         
@@ -1061,10 +1091,16 @@ def update_dataset_resources(dataset_entity):
             logger.info('Updating GDB resource')
         
         gdb_resource['name'] = title + ' - GDB'
-        gdb_resource['description'] = title
+        gdb_resource['description'] = title + ' - Esri File Geodatabase'
         gdb_resource['url'] = args.download_url + dataset_file_name + '/gdb/' + dataset_file_name + '.zip'
         gdb_resource['mimetype'] = 'application/zip'
-        gdb_resource['format'] = 'GDB'        
+        gdb_resource['format'] = 'gdb'
+        gdb_resource['resource_type'] = 'file'
+        
+        # Get the size of the file
+        file_size = get_file_size(output_folder + '\\gdb\\' + dataset_file_name + '.zip')
+        if file_size:
+            gdb_resource['size'] = file_size         
                     
     # Update the resources on the dataset                    
     dataset_entity['resources'] = resources;
@@ -1096,6 +1132,25 @@ def get_resource_by_format(resources, format_type):
             return resource
     
     return None 
+
+def get_file_size(file_path):
+    """Gets the size in bytes of the specified file. 
+       
+    Parameters:
+        file_path - A string with the path to the file
+    
+    Returns:
+        string - The size in bytes of the file 
+    """        
+
+    file_size = None
+    
+    try:
+        file_size = os.path.getsize(file_path);
+    except:
+        logger.warn('Unable to retrieve file size for resource: ' + file_path)
+    
+    return file_size 
             
 def update_local_dataset_from_metadata(dataset_entity):
     """Updates the CKAN dataset entity by reading in metadata
