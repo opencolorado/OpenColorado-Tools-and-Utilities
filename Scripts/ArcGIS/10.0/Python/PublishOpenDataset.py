@@ -71,7 +71,7 @@ outCoordSystem = "GEOGCS['GCS_WGS_1984',\
     PRIMEM['Greenwich',0.0],\
     UNIT['Degree',0.0174532925199433]]"
         
-geographicTransformation = "NAD_1983_HARN_To_WGS_1984"
+geographicTransformation = 'NAD_1983_HARN_To_WGS_1984'
 
 def main():
     """Main function
@@ -172,7 +172,7 @@ def main():
         help='The XSLT stylesheet to pass the FGDC CSDGM metadata through before publishing.')
     
     parser.add_argument('-r', '--exe-result',
-        action="store",
+        action='store',
         dest='exe_result',
         choices=['export', 'publish', 'all'],
         default='all',
@@ -184,6 +184,13 @@ def main():
         choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL','NOTSET'],
         default='INFO', 
         help='The level of detail to output to log files.')
+    
+    parser.add_argument('-b', '--build-target',
+        action='store', 
+        dest='build_target',
+        choices=['TEST','PROD'],
+        default='TEST', 
+        help='The server tier the script is running on. Only PROD supports email alerts.')
         
     # Positional arguments
     parser.add_argument('feature_class',
@@ -300,13 +307,12 @@ def main():
         # until the arcpy process exits. Clean up should go at the end here:
         # delete_dataset_temp_folder()
 
-        logger.info("Done - PublishOpenDataset " + args.dataset_name)
+        logger.info('Done - PublishOpenDataset ' + args.dataset_name)
         logger.info('============================================================')
-        
+               
     except:
         if logger:
-            logger.exception("{0} {1}".format(sys.exc_info()[1], sys.exc_info()[0]))
-            logger.warn("Exiting PublishOpenDataset")
+            logger.exception('Error publishing dataset {0}. {1} {2}'.format(args.dataset_name,sys.exc_info()[1], sys.exc_info()[0]))
             
         sys.exit(1)
         
@@ -339,7 +345,7 @@ def publish_to_ckan():
         update_dataset(dataset_entity)
 
     # Update the dataset version on the CKAN repository (causes the last modified date to be updated)
-    if args.increment != "none":
+    if args.increment != 'none':
         update_dataset_version()
         
 def remove_missing_formats_from_publication(directory):
@@ -377,7 +383,7 @@ def create_folder(directory, delete=False):
     """
     
     if os.path.exists(directory) and delete:
-        logger.debug('Deleting directory "' + directory)
+        logger.debug('Deleting directory ' + directory)
         shutil.rmtree(directory)
         
     if not os.path.exists(directory):
@@ -434,7 +440,7 @@ def delete_dataset_temp_folder():
 
     dataset_directory = os.path.join(temp_workspace, name)
     if os.path.exists(dataset_directory):                
-        logger.debug('Deleting directory "' + dataset_directory)
+        logger.debug('Deleting directory ' + dataset_directory)
         shutil.rmtree(dataset_directory)
 
 def publish_file(directory, file_name, file_type):
@@ -456,7 +462,7 @@ def get_dataset_filename():
         A string representing the dataset file name
     """
     global args
-    return args.dataset_name.replace("-","_")
+    return args.dataset_name.replace('-','_')
 
 def get_dataset_title():
     """Gets the title of the catalog dataset
@@ -467,7 +473,7 @@ def get_dataset_title():
     global args
 
     # Create the dataset title
-    return args.ckan_dataset_title_prefix + ": " + args.dataset_title
+    return args.ckan_dataset_title_prefix + ': ' + args.dataset_title
 
 def export_file_geodatabase():
     """Exports the feature class to a file geodatabase
@@ -483,7 +489,7 @@ def export_file_geodatabase():
     create_folder(temp_working_folder, True)
     
     # Export the feature class to a temporary file gdb
-    gdb_temp = os.path.join(temp_working_folder, name + ".gdb")
+    gdb_temp = os.path.join(temp_working_folder, name + '.gdb')
     gdb_feature_class = os.path.join(gdb_temp, name)
 
     if not arcpy.Exists(gdb_temp):
@@ -511,17 +517,17 @@ def publish_file_geodatabase():
 
     # Zip up the gdb folder contents
     logger.debug('Zipping the file geodatabase')
-    zip_file_name = os.path.join(temp_working_folder,name + ".zip")
-    zip_file = zipfile.ZipFile(zip_file_name, "w")   
-    gdb_file_name = os.path.join(temp_working_folder,name + ".gdb") 
-    for filename in glob.glob(gdb_file_name + "/*"):
+    zip_file_name = os.path.join(temp_working_folder,name + '.zip')
+    zip_file = zipfile.ZipFile(zip_file_name, 'w')   
+    gdb_file_name = os.path.join(temp_working_folder,name + '.gdb') 
+    for filename in glob.glob(gdb_file_name + '/*'):
         if (not filename.endswith('.lock')):
-            zip_file.write(filename, name + ".gdb/" + os.path.basename(filename), zipfile.ZIP_DEFLATED)
+            zip_file.write(filename, name + '.gdb/' + os.path.basename(filename), zipfile.ZIP_DEFLATED)
             
     zip_file.close()    
                
     # Publish the file geodatabase to the download folder
-    publish_file(temp_working_folder, name + ".zip","gdb")
+    publish_file(temp_working_folder, name + '.zip','gdb')
     
 def export_shapefile():
     """Exports the feature class as a zipped shapefile
@@ -542,23 +548,23 @@ def export_shapefile():
 
     # Export the shapefile to the folder
     source = staging_feature_class
-    destination = os.path.join(zip_folder,name + ".shp")
+    destination = os.path.join(zip_folder,name + '.shp')
     
     # Export the shapefile
     logger.debug('Exporting to shapefile from "' + source + '" to "' + destination + '"')
-    arcpy.CopyFeatures_management(source, destination, "", "0", "0", "0")
+    arcpy.CopyFeatures_management(source, destination, '', '0', '0', '0')
     
     # Zip up the files
     logger.debug('Zipping the shapefile')
-    zip_file = zipfile.ZipFile(os.path.join(temp_working_folder,name + ".zip"), "w")
+    zip_file = zipfile.ZipFile(os.path.join(temp_working_folder,name + '.zip'), 'w')
     
-    for filename in glob.glob(zip_folder + "/*"):
+    for filename in glob.glob(zip_folder + '/*'):
         zip_file.write(filename, os.path.basename(filename), zipfile.ZIP_DEFLATED)
         
     zip_file.close()
     
     # Publish the zipfile to the download folder
-    publish_file(temp_working_folder, name + ".zip","shape")
+    publish_file(temp_working_folder, name + '.zip','shape')
     
 def export_cad():
     """Exports the feature class as a CAD drawing file
@@ -575,14 +581,14 @@ def export_cad():
     
     # Export the shapefile to the folder
     source = staging_feature_class
-    destination = os.path.join(temp_working_folder,name + ".dwg")
+    destination = os.path.join(temp_working_folder,name + '.dwg')
     
     # Export the drawing file
     logger.debug('Exporting to DWG file from "' + source + '" to "' + destination + '"')
-    arcpy.ExportCAD_conversion(source, "DWG_R2000", destination, "Ignore_Filenames_in_Tables", "Overwrite_Existing_Files", "")
+    arcpy.ExportCAD_conversion(source, 'DWG_R2000', destination, 'Ignore_Filenames_in_Tables', 'Overwrite_Existing_Files', '')
     
     # Publish the zipfile to the download folder
-    publish_file(temp_working_folder, name + ".dwg","cad")
+    publish_file(temp_working_folder, name + '.dwg','cad')
         
 def export_kml():
     """Exports the feature class to a kml file
@@ -590,7 +596,7 @@ def export_kml():
     Returns:
         None
     """
-    arcpy.CheckOutExtension("3D")
+    arcpy.CheckOutExtension('3D')
     
     folder = 'kml'
     name = get_dataset_filename()
@@ -598,11 +604,11 @@ def export_kml():
     # Create a kml folder in the temp directory if it does not exist
     temp_working_folder = os.path.join(temp_workspace,folder)
     create_folder(temp_working_folder, True)
-    destination = os.path.join(temp_working_folder,name + ".kmz")        
+    destination = os.path.join(temp_working_folder,name + '.kmz')        
     
     # Make a feature layer (in memory)
     logger.debug('Generating KML file in memory from  "' + staging_feature_class + '"')
-    arcpy.MakeFeatureLayer_management(staging_feature_class, name, "", "")
+    arcpy.MakeFeatureLayer_management(staging_feature_class, name, '', '')
     
     # Encode special characters that don't convert to KML correctly.
     # Replace any literal nulls <Null> with empty as these don't convert to KML correctly
@@ -610,14 +616,14 @@ def export_kml():
 
     # Convert the layer to KML
     logger.debug('Exporting KML file (KMZ) to "' + destination + '"')
-    arcpy.LayerToKML_conversion(name, destination, "20000", "false", "DEFAULT", "1024", "96")
+    arcpy.LayerToKML_conversion(name, destination, '20000', 'false', 'DEFAULT', '1024', '96')
         
     # Delete the in-memory feature layer and the file geodatabase
     logger.debug('Deleting in-memory feature layer:' + name)
     arcpy.Delete_management(name)
 
     # Publish the zipfile to the download folder
-    publish_file(temp_working_folder, name + ".kmz","kml")
+    publish_file(temp_working_folder, name + '.kmz','kml')
     
 def export_metadata():
     """Exports the feature class metadata to an xml file
@@ -635,30 +641,30 @@ def export_metadata():
     
     # Set the destinion of the metadata export
     source = staging_feature_class
-    raw_metadata_export = os.path.join(temp_working_folder,name + "_raw.xml")
+    raw_metadata_export = os.path.join(temp_working_folder,name + '_raw.xml')
     
     # Export the metadata
     arcpy.env.workspace = temp_working_folder
-    installDir = arcpy.GetInstallInfo("desktop")["InstallDir"]
-    translator = installDir + "Metadata/Translator/ARCGIS2FGDC.xml"
+    installDir = arcpy.GetInstallInfo('desktop')['InstallDir']
+    translator = installDir + 'Metadata/Translator/ARCGIS2FGDC.xml'
     arcpy.ExportMetadata_conversion(source, translator, raw_metadata_export)
 
     # Process: XSLT Transformation to remove any sensitive info or format
-    destination = os.path.join(temp_working_folder,name + ".xml")    
+    destination = os.path.join(temp_working_folder,name + '.xml')    
     if os.path.exists(args.metadata_xslt):
-        logger.info("Applying metadata XSLT: " + args.metadata_xslt)
-        arcpy.XSLTransform_conversion(raw_metadata_export, args.metadata_xslt, destination, "")
+        logger.info('Applying metadata XSLT: ' + args.metadata_xslt)
+        arcpy.XSLTransform_conversion(raw_metadata_export, args.metadata_xslt, destination, '')
         
         # Reimport the clean metadata into the FGDB
-        logger.debug("Reimporting metadata to file geodatabase " + destination)
+        logger.debug('Reimporting metadata to file geodatabase ' + destination)
         arcpy.MetadataImporter_conversion(destination,staging_feature_class)        
     else:
         # If no transformation exists, just rename and publish the raw metadata
-        logger.warn("Metadata XSLT not found")
+        logger.warn('Problem publishing dataset {0}. Metadata XSLT not found.'.format(args.dataset_name))        
         os.rename(raw_metadata_export, destination)
                 
     # Publish the metadata to the download folder
-    publish_file(temp_working_folder, name + ".xml","metadata")
+    publish_file(temp_working_folder, name + '.xml','metadata')
     
 def publish_metadata():
     """Publishes the already exported metadata to the Open Data Catalog
@@ -674,7 +680,7 @@ def publish_metadata():
     temp_working_folder = os.path.join(temp_workspace,folder)
         
     # Publish the metadata to the download folder
-    publish_file(temp_working_folder, name + ".xml","metadata")
+    publish_file(temp_working_folder, name + '.xml','metadata')
 
 def export_csv():
     """Exports the feature class as a csv file
@@ -691,7 +697,7 @@ def export_csv():
     
     # Export the csv to the folder
     source = staging_feature_class
-    destination = os.path.join(temp_working_folder,name + ".csv")
+    destination = os.path.join(temp_working_folder,name + '.csv')
 
     # Export the csv
     logger.debug('Exporting to csv from "' + source + '" to "' + destination + '"')
@@ -706,12 +712,12 @@ def export_csv():
     fieldnames = [f.name for f in arcpy.ListFields(source)]
     
     # Exclude the OBJECTID field
-    if "OBJECTID" in fieldnames:
-        fieldnames.remove("OBJECTID")
+    if 'OBJECTID' in fieldnames:
+        fieldnames.remove('OBJECTID')
             
     # Exclude the shape field for now (TODO: publish as geojson in the future)
-    if "SHAPE" in fieldnames:
-        fieldnames.remove("SHAPE")
+    if 'SHAPE' in fieldnames:
+        fieldnames.remove('SHAPE')
     
     # Write the header row
     csv_writer.writerow(fieldnames)
@@ -728,7 +734,7 @@ def export_csv():
     csv_file.close()
     
     # Publish the csv to the download folder
-    publish_file(temp_working_folder, name + ".csv","csv")
+    publish_file(temp_working_folder, name + '.csv','csv')
 
 def drop_exclude_fields():
     """Removes all fields (columns) from a dataset passed into the exclude-fields
@@ -744,7 +750,7 @@ def drop_exclude_fields():
     # Get the list of fields to exclude (passed as an argument)
     exclude_fields = args.exclude_fields
     if exclude_fields != None:
-        logger.info("Deleting fields: " + exclude_fields)
+        logger.info('Deleting fields: ' + exclude_fields)
 
         # If commas are used instead of semi-colons, swap them
         exclude_fields = exclude_fields.replace(',',';')
@@ -817,10 +823,10 @@ def get_remote_dataset(dataset_id):
     try:
         # Get the dataset
         dataset_entity = ckan_client.package_entity_get(dataset_id)
-        logger.info("Dataset " + dataset_id + " found on OpenColorado")
+        logger.info('Dataset ' + dataset_id + ' found on OpenColorado')
         
     except ckanclient.CkanApiNotFoundError:
-        logger.info("Dataset " + dataset_id + " not found on OpenColorado")
+        logger.info('Dataset ' + dataset_id + ' not found on OpenColorado')
 
     return dataset_entity
 
@@ -848,7 +854,7 @@ def create_dataset(dataset_id):
         # Create a new dataset in CKAN
         create_remote_dataset(dataset_entity)
     else:
-        logger.info("Publication run type set to {0}, skipping remote creation of dataset.".format(args.exe_result))
+        logger.info('Publication run type set to {0}, skipping remote creation of dataset.'.format(args.exe_result))
         
 def create_local_dataset(dataset_id):
     """Creates a new dataset entity, but does not commit it to CKAN
@@ -878,7 +884,7 @@ def create_local_dataset(dataset_id):
             logger.info('Adding dataset to group: ' + args.ckan_group_name)        
             dataset_entity['groups'] = [group_entity['id']]
     except ckanclient.CkanApiNotFoundError:
-        logger.warn('Group: ' + args.ckan_group_name + ' not found on OpenColorado')
+        logger.warn('Problem publishing dataset {0}. Group: {1} not found on CKAN.'.format(args.dataset_name,args.ckan_group_name))        
         dataset_entity['groups'] = []        
 
     return dataset_entity
@@ -1148,7 +1154,7 @@ def get_file_size(file_path):
     try:
         file_size = os.path.getsize(file_path);
     except:
-        logger.warn('Unable to retrieve file size for resource: ' + file_path)
+        logger.warn('Problem publishing dataset {0}. Unable to retrieve file size for resource: {1}.'.format(args.dataset_name,file_path))        
     
     return file_size 
 
@@ -1197,10 +1203,10 @@ def update_local_dataset_from_metadata(dataset_entity):
     folder = 'metadata'
     name = get_dataset_filename()
     working_folder = os.path.join(output_folder, folder)
-    file_path = os.path.join(working_folder,name + ".xml")
+    file_path = os.path.join(working_folder,name + '.xml')
     
     # Open the file and read in the xml
-    metadata_file = open(file_path,"r")
+    metadata_file = open(file_path,'r')
     metadata_xml = et.parse(metadata_file)
     metadata_file.close()
     
@@ -1214,7 +1220,7 @@ def update_local_dataset_from_metadata(dataset_entity):
     if (abstract_element is not None):
         dataset_entity['notes'] = abstract_element.text
     else:
-        logger.warn('No abstract found in metadata');
+        logger.warn('Problem publishing dataset {0}. No abstract found in metadata.'.format(args.dataset_name))        
 
     # Get the maintainer
     xpath_maintainer= '//distinfo/distrib/cntinfo/cntorgp/cntorg'
@@ -1222,7 +1228,7 @@ def update_local_dataset_from_metadata(dataset_entity):
     if (maintainer_element != None):
         dataset_entity['maintainer'] = maintainer_element.text
     else:
-        logger.warn('No maintainer found in metadata');
+        logger.warn('Problem publishing dataset {0}. No maintainer found in metadata.'.format(args.dataset_name))        
 
     # Get the maintainer email
     xpath_maintainer_email = '//distinfo/distrib/cntinfo/cntemail'
@@ -1230,7 +1236,7 @@ def update_local_dataset_from_metadata(dataset_entity):
     if (maintainer_email_element != None):
         dataset_entity['maintainer_email'] = maintainer_email_element.text
     else:
-        logger.warn('No maintainer email found in metadata');
+        logger.warn('Problem publishing dataset {0}. No maintainer email found in metadata.'.format(args.dataset_name))        
 
     # Get the author
     xpath_author = '//idinfo/citation/citeinfo/origin'
@@ -1238,7 +1244,7 @@ def update_local_dataset_from_metadata(dataset_entity):
     if (author_element != None):
         dataset_entity['author'] = author_element.text
     else:
-        logger.warn('No author found in metadata');
+        logger.warn('Problem publishing dataset {0}. No author found in metadata.'.format(args.dataset_name))        
 
     # Get the author_email
     dataset_entity['author_email'] = ''
@@ -1323,7 +1329,7 @@ def update_dataset_version():
         ckan.package_entity_put(dataset_entity)
         
     except ckanclient.CkanApiNotFoundError:
-        logger.info(" Dataset " + dataset_id + " not found on OpenColorado")
+        logger.info(' Dataset ' + dataset_id + ' not found on OpenColorado')
 
 def increment_version(version, increment_type):
     """Increments the version number
@@ -1339,10 +1345,10 @@ def increment_version(version, increment_type):
     incremented_version = version
     
     if version == None:
-        incremented_version = "1.0.0"
+        incremented_version = '1.0.0'
         logger.info('No version number found.  Setting version to ' + incremented_version);
     else:
-        version_parts = version.split(".")
+        version_parts = version.split('.')
         if len(version_parts) == 3:
             major = int(version_parts[0])
             minor = int(version_parts[1])
@@ -1355,7 +1361,7 @@ def increment_version(version, increment_type):
             elif increment_type == 'revision':      
                 revision = revision + 1
                 
-            incremented_version = str(major) + "." + str(minor) + "." + str(revision)
+            incremented_version = str(major) + '.' + str(minor) + '.' + str(revision)
             logger.info('Incrementing CKAN dataset version from ' + version + ' to ' + incremented_version);
     return incremented_version
 
@@ -1371,8 +1377,12 @@ def init_logger():
     """    
     global logger
     
-    logging.config.fileConfig('..\Config\Logging.config')        
-    logger = logging.getLogger("CustomLogger")
+    logging.config.fileConfig('..\Config\Logging.config')
+    
+    if (args.build_target == 'PROD'):
+        logger = logging.getLogger('ProdLogger')
+    else:
+        logger = logging.getLogger('DefaultLogger')
     
     # Set the log level passed as a parameter
     numeric_level = getattr(logging, args.log_level.upper(), None)
@@ -1381,7 +1391,7 @@ def init_logger():
     logger.setLevel(numeric_level)    
     
     # Change the name of the logger to the name of this module
-    logger.name = "PublishOpenDataset"
+    logger.name = 'PublishOpenDataset'
 
     # Create a file handler and set configuration the same as the console handler
     # This is done to set the name of the log file name at runtime
