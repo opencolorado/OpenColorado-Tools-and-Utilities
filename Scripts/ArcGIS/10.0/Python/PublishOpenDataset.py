@@ -271,6 +271,14 @@ def main():
             if 'shp' in args.formats:
                 logger.info('Exporting to shapefile')
                 export_shapefile()
+                
+            if 'metadata' in args.formats:
+                logger.info('Exporting metadata XML file')
+                publish_metadata()
+
+            if 'gdb' in args.formats:
+                logger.info('Publishing file geodatabase')
+                publish_file_geodatabase()                
     
             if 'dwg' in args.formats:
                 logger.info('Exporting to CAD drawing file')
@@ -279,19 +287,11 @@ def main():
             if 'kml' in args.formats:
                 logger.info('Exporting to KML file')
                 export_kml()
-            
+                                          
             if 'csv' in args.formats:
                 logger.info('Exporting to CSV file')
                 export_csv()
-                
-            if 'metadata' in args.formats:
-                logger.info('Exporting metadata XML file')
-                publish_metadata()
-
-            if 'gdb' in args.formats:
-                logger.info('Publishing file geodatabase')
-                publish_file_geodatabase()
-               
+                              
         # Update the dataset information on the CKAN repository
         # if the exe_result is equal to 'publish' or 'both'.
         if args.exe_result != 'export':
