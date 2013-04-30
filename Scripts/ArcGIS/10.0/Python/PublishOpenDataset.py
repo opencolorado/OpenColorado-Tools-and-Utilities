@@ -268,30 +268,54 @@ def main():
                 drop_exclude_fields()
                 export_metadata()
                 
-            if 'shp' in args.formats:
-                logger.info('Exporting to shapefile')
-                export_shapefile()
-                
+            if 'shp' in args.formats:               
+                try:
+                    logger.info('Exporting to shapefile')
+                    export_shapefile()
+                except:
+                    if logger:
+                        logger.exception('Error publishing shapefile for dataset {0}. {1} {2}'.format(args.dataset_name,sys.exc_info()[1], sys.exc_info()[0]))
+                        
             if 'metadata' in args.formats:
-                logger.info('Exporting metadata XML file')
-                publish_metadata()
+                try:
+                    logger.info('Exporting metadata XML file')
+                    publish_metadata()
+                except:
+                    if logger:
+                        logger.exception('Error publishing metadata for dataset {0}. {1} {2}'.format(args.dataset_name,sys.exc_info()[1], sys.exc_info()[0]))
 
             if 'gdb' in args.formats:
-                logger.info('Publishing file geodatabase')
-                publish_file_geodatabase()                
+                try:
+                    logger.info('Publishing file geodatabase')
+                    publish_file_geodatabase()
+                except:
+                    if logger:
+                        logger.exception('Error publishing file geodatabase for dataset {0}. {1} {2}'.format(args.dataset_name,sys.exc_info()[1], sys.exc_info()[0]))                                   
     
             if 'dwg' in args.formats:
-                logger.info('Exporting to CAD drawing file')
-                export_cad()
-    
+                try:
+                    logger.info('Exporting to CAD drawing file')
+                    export_cad()
+                except:
+                    if logger:
+                        logger.exception('Error publishing CAD for dataset {0}. {1} {2}'.format(args.dataset_name,sys.exc_info()[1], sys.exc_info()[0]))
+                        
             if 'kml' in args.formats:
-                logger.info('Exporting to KML file')
-                export_kml()
+                try:
+                    logger.info('Exporting to KML file')
+                    export_kml()
+                except:
+                    if logger:
+                        logger.exception('Error publishing KML for dataset {0}. {1} {2}'.format(args.dataset_name,sys.exc_info()[1], sys.exc_info()[0]))               
                                           
             if 'csv' in args.formats:
-                logger.info('Exporting to CSV file')
-                export_csv()
-                              
+                try:
+                    logger.info('Exporting to CSV file')
+                    export_csv()
+                except:
+                    if logger:
+                        logger.exception('Error publishing CSV for dataset {0}. {1} {2}'.format(args.dataset_name,sys.exc_info()[1], sys.exc_info()[0]))
+
         # Update the dataset information on the CKAN repository
         # if the exe_result is equal to 'publish' or 'both'.
         if args.exe_result != 'export':
@@ -722,19 +746,32 @@ def export_csv():
     # Write the header row
     csv_writer.writerow(fieldnames)
     
-    # Write the values
+    # Write the values to CSV.
+    error_report = ''
+    error_count = 0
     for row in rows:
         values = []
         for field in fieldnames:
                 values.append(row.getValue(field))
-                
-        csv_writer.writerow(values)    
+        try:            
+            csv_writer.writerow(values)
+        except:
+            # Catch any exceptions and consolidate a single error report.
+            error_count += 1
+            error_report = '{0}\n{1}'.format(error_report, values)
+            if logger:
+                logger.debug('Error publishing record to CSV for dataset {0}. {1} {2} {3}'.format(args.dataset_name,sys.exc_info()[1], sys.exc_info()[0], values))
     
     # Close the CSV file
     csv_file.close()
-    
-    # Publish the csv to the download folder
-    publish_file(temp_working_folder, name + '.csv','csv')
+
+    # Log an exception for all records that have failed on this dataset    
+    if error_count > 0:
+        sys.exc_clear()
+        logger.exception('Error publishing CSV for dataset {0}. The following records prevented the CSV from publish correctly. Check for invalid characters: {1}'.format(args.dataset_name, error_report))
+    else:
+        # Publish the csv to the download folder
+        publish_file(temp_working_folder, name + '.csv','csv')
 
 def drop_exclude_fields():
     """Removes all fields (columns) from a dataset passed into the exclude-fields
