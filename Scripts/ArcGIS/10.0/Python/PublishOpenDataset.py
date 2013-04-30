@@ -176,7 +176,7 @@ def main():
         dest='exe_result',
         choices=['export', 'publish', 'all'],
         default='all',
-        help='Result of executing this script; export, publish to CKAN, or both.')
+        help='Result of executing this script; export data files only, publish to CKAN, or both.')
         
     parser.add_argument('-v', '--log-level',
         action='store', 
@@ -191,6 +191,13 @@ def main():
         choices=['TEST','PROD'],
         default='TEST', 
         help='The server tier the script is running on. Only PROD supports email alerts.')
+    
+    parser.add_argument('-n', '--gdb-version',
+        action='store', 
+        dest='gdb_version',
+        choices=['9.2','9.3','10.0','CURRENT'],
+        default='9.3', 
+        help='The oldest version of Esri ArcGIS file geodatabases need to work with.')
         
     # Positional arguments
     parser.add_argument('feature_class',
@@ -517,8 +524,10 @@ def export_file_geodatabase():
     gdb_feature_class = os.path.join(gdb_temp, name)
 
     if not arcpy.Exists(gdb_temp):
-        logger.debug('Creating temporary file geodatabase for processing:' + gdb_temp)
-        arcpy.CreateFileGDB_management(os.path.dirname(gdb_temp), os.path.basename(gdb_temp)) 
+        logger.debug('Creating temp file geodatabase v' + args.gdb_version + ' for processing:' + gdb_temp)
+        
+        # Create an empty file geodatabase compatible back to ArcGIS 9.3+.
+        arcpy.CreateFileGDB_management(os.path.dirname(gdb_temp), os.path.basename(gdb_temp), args.gdb_version) 
 
     logger.debug('Copying featureclass from:' + source_feature_class)
     logger.debug('Copying featureclass to:' + gdb_feature_class)
