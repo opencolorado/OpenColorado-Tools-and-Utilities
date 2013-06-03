@@ -6,11 +6,10 @@ publishing [ESRI] (http://www.esri.com) feature classes into CKAN datasets using
 
 
 ### About
-This project was created in partnership with [Open Colorado] (http://www.opencolorado.org) and 
-Colorado Smart Communities.  
+This project was created in partnership with [Open Colorado] (http://www.opencolorado.org).  
 
 These scripts were created for communities that want to leverage the Colorado CKAN 
-repository (http://colorado.ckan.net).
+repository (http://data.opencolorado.org).
 
-There is no specific implemention in this project related to colorado.ckan.net so this can be
+There is no specific implemention in this project related to data.opencolorado.org so this can be
 used with any CKAN instance.
